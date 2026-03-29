@@ -147,9 +147,22 @@ app.use('/api/payments', paymentRoutes);
 
 // Middleware
 app.use(express.json());
+const allowedOrigins = [
+  'https://carp-connect-ride-sharing-plateform.vercel.app',
+  'http://localhost:8080',
+  'http://localhost:3000'
+];
 app.use(
   cors({
-    origin: true, // allows any origin
+    origin: function (origin, callback) {
+      // allow requests with no origin (like mobile apps, curl, etc.)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        return callback(null, true);
+      } else {
+        return callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true
   })
 );
