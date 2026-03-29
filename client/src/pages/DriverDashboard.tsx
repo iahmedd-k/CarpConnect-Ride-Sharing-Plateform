@@ -34,6 +34,7 @@ import Emissions from "./dashboard/Emissions";
 import RideHistory from "./dashboard/RideHistory";
 import SubscriptionPage from "./dashboard/SubscriptionPage";
 import DriverOverviewCompact from "./dashboard/DriverOverviewCompact";
+import BrandLogo from "@/components/BrandLogo";
 
 const navItems = [
     { id: "overview", icon: TrendingUp, label: "Dashboard" },
@@ -395,10 +396,7 @@ const DriverDashboard = () => {
             <aside className="fixed inset-y-0 left-0 z-40 hidden h-screen w-64 overflow-hidden border-r border-white/5 bg-[#0a0a0c] lg:flex lg:flex-col">
                 <div className="shrink-0 border-b border-white/5 px-5 py-5">
                     <Link to="/" className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-primary to-primary-light shadow-glow">
-                            <Car className="h-5 w-5 text-white" />
-                        </div>
-                        <span className="text-lg font-bold tracking-tight text-white">CarpConnect</span>
+                        <BrandLogo dark textClassName="text-lg text-white" />
                     </Link>
                 </div>
 

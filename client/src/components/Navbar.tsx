@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, Car, ChevronDown } from "lucide-react";
+import { Menu, X, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "react-router-dom";
+import BrandLogo from "@/components/BrandLogo";
 
 const navLinks = [
   { label: "How It Works", href: "/#how-it-works" },
@@ -54,12 +55,7 @@ const Navbar = () => {
     >
       <div className="container flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow group-hover:scale-105 transition-transform">
-            <Car className="w-5 h-5 text-primary-foreground" />
-          </div>
-          <span className="font-display text-xl font-bold text-foreground">
-            Carp<span className="text-gradient-primary">Connect</span>
-          </span>
+          <BrandLogo className="group-hover:scale-[1.02] transition-transform" />
         </Link>
 
         <nav className="hidden md:flex items-center gap-8">

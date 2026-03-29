@@ -1,0 +1,31 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#081512"/>
+  <circle cx="1037" cy="105" r="211" fill="#16C7A2" fill-opacity="0.12"/>
+  <circle cx="164" cy="551" r="198" fill="#16C7A2" fill-opacity="0.08"/>
+  <rect x="78" y="78" width="1044" height="474" rx="38" fill="url(#panel)"/>
+  <rect x="122" y="122" width="132" height="132" rx="28" fill="url(#brand)"/>
+  <path d="M148 196L163 166C165.9 160.3 171.7 157 178.4 157H204.8C213.4 157 221.1 161.7 224.9 169.3L235.7 191.3C237.7 195.4 234.7 200.2 230.1 200.2H148Z" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M157 200V208C157 213.5 161.5 218 167 218H213C218.5 218 223 213.5 223 208V200" stroke="white" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="172" cy="218" r="9" fill="white"/>
+  <circle cx="208" cy="218" r="9" fill="white"/>
+  <path d="M190 129C202.7 131.1 212.9 141.3 215 154" stroke="white" stroke-width="7" stroke-linecap="round"/>
+  <path d="M190 157C183.5 150.3 181 141.4 183.5 133C192 135.4 201.2 138.1 207.8 144.7C202 155.9 195.9 158.9 190 157Z" fill="white"/>
+  <path d="M143 177C152.8 166.7 164.8 159.2 178.2 154.7" stroke="white" stroke-width="6" stroke-linecap="round" stroke-dasharray="7 8"/>
+  <text x="286" y="191" fill="white" font-family="Segoe UI, Arial, sans-serif" font-size="60" font-weight="700">CarpConnect</text>
+  <text x="286" y="250" fill="#16C7A2" font-family="Segoe UI, Arial, sans-serif" font-size="28" font-weight="600">Smarter, safer, sustainable carpooling</text>
+  <text x="122" y="336" fill="#D7E6E1" font-family="Segoe UI, Arial, sans-serif" font-size="28">Ride-sharing platform for riders and drivers with bookings,</text>
+  <text x="122" y="378" fill="#D7E6E1" font-family="Segoe UI, Arial, sans-serif" font-size="28">live ride management, Stripe billing, real-time chat,</text>
+  <text x="122" y="420" fill="#D7E6E1" font-family="Segoe UI, Arial, sans-serif" font-size="28">earnings, community and emissions tracking.</text>
+  <rect x="122" y="464" width="188" height="48" rx="24" fill="#16C7A2" fill-opacity="0.16" stroke="#16C7A2" stroke-opacity="0.4"/>
+  <text x="155" y="495" fill="#16C7A2" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">Ride. Share. Save.</text>
+  <defs>
+    <linearGradient id="brand" x1="136" y1="128" x2="241" y2="241" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#16C7A2"/>
+      <stop offset="1" stop-color="#11866F"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="78" y1="78" x2="1105" y2="545" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10211D"/>
+      <stop offset="1" stop-color="#0B1714"/>
+    </linearGradient>
+  </defs>
+</svg>

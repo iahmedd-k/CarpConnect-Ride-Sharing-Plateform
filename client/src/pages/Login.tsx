@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Car, Eye, EyeOff, Mail, Lock, ArrowRight, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, ArrowRight, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import api from "../lib/api";
+import BrandLogo from "@/components/BrandLogo";
 
 const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
@@ -77,12 +78,7 @@ const Login = () => {
         {/* Logo */}
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-3 group">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-glow group-hover:scale-105 transition-transform">
-              <Car className="w-6 h-6 text-white" />
-            </div>
-            <span className="font-display text-2xl font-bold text-primary-foreground">
-              Carp<span className="text-gradient-primary">Connect</span>
-            </span>
+            <BrandLogo dark className="group-hover:scale-[1.02] transition-transform" textClassName="text-2xl text-primary-foreground" iconClassName="h-12 w-12" />
           </Link>
           <p className="text-primary-foreground/50 text-sm mt-3">Welcome back, rider 👋</p>
         </div>

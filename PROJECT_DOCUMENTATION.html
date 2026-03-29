@@ -1,0 +1,1003 @@
+﻿<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>CarpConnect Project Documentation</title><style>body{font-family:Segoe UI,Arial,sans-serif;color:#1f2937;line-height:1.55;margin:40px auto;max-width:980px;padding:0 24px;background:#fff}h1,h2,h3{color:#0f172a}h1{font-size:30px;border-bottom:2px solid #e5e7eb;padding-bottom:12px}h2{font-size:22px;margin-top:34px;border-bottom:1px solid #e5e7eb;padding-bottom:6px}h3{font-size:18px;margin-top:22px}p,li{font-size:14px}ul{margin-top:6px;margin-bottom:14px}code{background:#f3f4f6;padding:2px 6px;border-radius:6px;font-family:Consolas,monospace;font-size:13px}.muted{color:#6b7280}hr{border:none;border-top:1px solid #e5e7eb;margin:24px 0}</style></head><body>
+<h1>CarpConnect Final Project Documentation</h1>
+<h2>1. Project Overview</h2>
+<p>CarpConnect is a full-stack ride-sharing and carpool management platform designed for two primary user roles:</p>
+<ul>
+<li>Rider</li>
+<li>Driver</li>
+</ul>
+<p>The platform allows riders to search for rides, create ride requests, book rides, pay through Stripe or cash-based flows, track live trips, communicate with drivers, manage subscriptions, and view emissions impact.</p>
+<p>Drivers can publish ride offers, manage rider requests, accept or reject riders, go live during trips, track earnings, receive reviews, and monitor their own subscription and usage limits.</p>
+<p>The system combines:</p>
+<ul>
+<li>A React + Vite frontend</li>
+<li>An Express + Node.js backend</li>
+<li>MongoDB for persistence</li>
+<li>Socket.IO for real-time communication</li>
+<li>Stripe for subscription billing and payment intent flows</li>
+<li>Mapping/geolocation integrations for route and nearby ride discovery</li>
+</ul>
+<hr/>
+<h2>2. Business Goals</h2>
+<p>The product is designed to support:</p>
+<ul>
+<li>Shared mobility and carpool coordination</li>
+<li>Cost savings for riders and drivers</li>
+<li>Environmental impact tracking through emissions savings</li>
+<li>Subscription-based monetization</li>
+<li>Real-time trip operations and communication</li>
+</ul>
+<hr/>
+<h2>3. High-Level Architecture</h2>
+<h3>Frontend</h3>
+<p>Location: <code>client/</code></p>
+<p>Technology stack:</p>
+<ul>
+<li>React 18</li>
+<li>TypeScript</li>
+<li>Vite</li>
+<li>Tailwind CSS</li>
+<li>Shadcn/Radix UI</li>
+<li>Framer Motion</li>
+<li>Recharts</li>
+<li>Socket.IO client</li>
+<li>Stripe client libraries</li>
+<li>React Router</li>
+</ul>
+<h3>Backend</h3>
+<p>Location: <code>Server/</code></p>
+<p>Technology stack:</p>
+<ul>
+<li>Node.js</li>
+<li>Express</li>
+<li>Mongoose</li>
+<li>MongoDB</li>
+<li>Socket.IO</li>
+<li>Stripe SDK</li>
+<li>JWT authentication</li>
+</ul>
+<h3>Real-Time Layer</h3>
+<ul>
+<li>Socket.IO is initialized in `Server/server.js`</li>
+<li>User-specific rooms and driver-specific rooms are created automatically</li>
+<li>Ride and chat rooms are joined dynamically</li>
+</ul>
+<h3>Database</h3>
+<ul>
+<li>MongoDB is connected through `Server/config/db.js`</li>
+<li>Mongoose models define all business entities</li>
+</ul>
+<hr/>
+<h2>4. Core User Roles</h2>
+<h3>Rider</h3>
+<p>Rider capabilities:</p>
+<ul>
+<li>Search rides</li>
+<li>View nearby rides</li>
+<li>Create direct bookings</li>
+<li>Create ride requests</li>
+<li>Accept or reject counter offers</li>
+<li>Track ongoing rides</li>
+<li>View ride history</li>
+<li>Chat with drivers</li>
+<li>View wallet and emissions</li>
+<li>Manage subscription plan</li>
+<li>Rate drivers</li>
+</ul>
+<h3>Driver</h3>
+<p>Driver capabilities:</p>
+<ul>
+<li>Publish ride offers</li>
+<li>Manage incoming rider requests</li>
+<li>Accept, reject, or counter requests</li>
+<li>View active bookings</li>
+<li>Go live during trips</li>
+<li>Track earnings</li>
+<li>View driver ratings</li>
+<li>Access ride history</li>
+<li>Manage account and vehicle profile</li>
+<li>Manage subscription plan</li>
+</ul>
+<hr/>
+<h2>5. Frontend Module Breakdown</h2>
+<h3>5.1 Public Pages</h3>
+<p>These are marketing and entry pages outside the dashboards.</p>
+<ul>
+<li>`client/src/pages/About.tsx`</li>
+</ul>
+<p>  - About page and product/company story</p>
+<ul>
+<li>`client/src/pages/Contact.tsx`</li>
+</ul>
+<p>  - Contact/inquiry page</p>
+<ul>
+<li>`client/src/pages/Vision.tsx`</li>
+</ul>
+<p>  - Vision/mission page</p>
+<ul>
+<li>`client/src/pages/Login.tsx`</li>
+</ul>
+<p>  - User login screen</p>
+<ul>
+<li>`client/src/pages/Signup.tsx`</li>
+</ul>
+<p>  - User registration screen</p>
+<h3>5.2 Landing Page Components</h3>
+<p>Used to explain the product publicly.</p>
+<ul>
+<li>`Hero.tsx`</li>
+<li>`Features.tsx`</li>
+<li>`HowItWorks.tsx`</li>
+<li>`Pricing.tsx`</li>
+<li>`Sustainability.tsx`</li>
+<li>`Testimonials.tsx`</li>
+<li>`FAQ.tsx`</li>
+<li>`CTA.tsx`</li>
+<li>`AppDownload.tsx`</li>
+<li>`Footer.tsx`</li>
+</ul>
+<p>Purpose:</p>
+<ul>
+<li>Present the product to visitors</li>
+<li>Explain plans and value proposition</li>
+<li>Convert visitors into registered users</li>
+</ul>
+<h3>5.3 Rider Dashboard</h3>
+<p>Main dashboard shell:</p>
+<ul>
+<li>`client/src/pages/Dashboard.tsx`</li>
+</ul>
+<p>Key rider dashboard modules:</p>
+<ul>
+<li>`RiderOverviewCompact.tsx`</li>
+</ul>
+<p>  - Dashboard summary view</p>
+<p>  - Quick stats and compact activity information</p>
+<ul>
+<li>`FindRide.tsx`</li>
+</ul>
+<p>  - Search rides by route/date</p>
+<p>  - Nearby ride discovery</p>
+<p>  - Direct booking flow</p>
+<p>  - Stripe payment modal trigger</p>
+<p>  - Ride request creation</p>
+<ul>
+<li>`MyRides.tsx`</li>
+</ul>
+<p>  - Rider-side ride list</p>
+<p>  - Booking state management</p>
+<p>  - Live ride state handling</p>
+<ul>
+<li>`Community.tsx`</li>
+</ul>
+<p>  - Community insights and top drivers</p>
+<ul>
+<li>`RiderRatings.tsx`</li>
+</ul>
+<p>  - Ratings given and received</p>
+<ul>
+<li>`Emissions.tsx`</li>
+</ul>
+<p>  - Environmental savings dashboard</p>
+<ul>
+<li>`WalletPage.tsx`</li>
+</ul>
+<p>  - Spend history and rider payment summary</p>
+<ul>
+<li>`SubscriptionPage.tsx`</li>
+</ul>
+<p>  - Billing page for Free, Plus, and Pro plans</p>
+<p>  - Real Stripe checkout</p>
+<p>  - Test bypass button for client/testing</p>
+<ul>
+<li>`Messages.tsx`</li>
+</ul>
+<p>  - Booking-based chat interface</p>
+<ul>
+<li>`AccountSettings.tsx`</li>
+</ul>
+<p>  - Rider account settings and preferences</p>
+<h3>5.4 Driver Dashboard</h3>
+<p>Main dashboard shell:</p>
+<ul>
+<li>`client/src/pages/DriverDashboard.tsx`</li>
+</ul>
+<p>Key driver dashboard modules:</p>
+<ul>
+<li>`DriverOverviewCompact.tsx`</li>
+</ul>
+<p>  - Driver summary and KPI view</p>
+<ul>
+<li>`MyOffers.tsx`</li>
+</ul>
+<p>  - Driver ride offer management</p>
+<ul>
+<li>`DriverBookings.tsx`</li>
+</ul>
+<p>  - Manage rider requests and accepted bookings</p>
+<ul>
+<li>`OfferRide.tsx`</li>
+</ul>
+<p>  - Publish new ride offers</p>
+<ul>
+<li>`LiveRide.tsx`</li>
+</ul>
+<p>  - Driver live trip operations</p>
+<p>  - Arrival, pickup, ride progression, and completion</p>
+<ul>
+<li>`DriverEarnings.tsx`</li>
+</ul>
+<p>  - Driver-side earnings summary and transaction ledger</p>
+<ul>
+<li>`DriverRatings.tsx`</li>
+</ul>
+<p>  - Driver reviews and compliments</p>
+<ul>
+<li>`DriverProfile.tsx`</li>
+</ul>
+<p>  - Public/driver profile details</p>
+<ul>
+<li>`RideHistory.tsx`</li>
+</ul>
+<p>  - Historical trip records for drivers</p>
+<ul>
+<li>`Messages.tsx`</li>
+</ul>
+<p>  - Driver-side booking chat</p>
+<ul>
+<li>`SubscriptionPage.tsx`</li>
+</ul>
+<p>  - Shared billing page used by both dashboards</p>
+<h3>5.5 Shared Frontend Components</h3>
+<ul>
+<li>`LeafletMap.tsx`</li>
+</ul>
+<p>  - Map rendering</p>
+<ul>
+<li>`GoogleMap.tsx`</li>
+</ul>
+<p>  - Google Maps rendering helper</p>
+<ul>
+<li>`StripeCheckoutModal.tsx`</li>
+</ul>
+<p>  - Stripe card-payment booking flow for ride payments</p>
+<ul>
+<li>`RealTimeNotifications.tsx`</li>
+</ul>
+<p>  - Socket-based notification listener</p>
+<ul>
+<li>`NotificationsPanel.tsx`</li>
+</ul>
+<p>  - Notification display panel</p>
+<ul>
+<li>`DriverProfileModal.tsx`</li>
+</ul>
+<p>  - Quick driver profile modal</p>
+<h3>5.6 Frontend Utility Modules</h3>
+<ul>
+<li>`client/src/lib/api.ts`</li>
+</ul>
+<p>  - Axios API wrapper</p>
+<ul>
+<li>`client/src/lib/plans.ts`</li>
+</ul>
+<p>  - Free/Plus/Pro plan definitions</p>
+<ul>
+<li>`client/src/lib/planAccess.ts`</li>
+</ul>
+<p>  - Plan access checks</p>
+<ul>
+<li>`client/src/lib/addressAutocomplete.ts`</li>
+</ul>
+<p>  - Address suggestions and geocoding support</p>
+<ul>
+<li>`client/src/lib/mapsLoader.ts`</li>
+</ul>
+<p>  - Loads Google Maps dynamically</p>
+<ul>
+<li>`client/src/lib/rideStatus.ts`</li>
+</ul>
+<p>  - Ride status formatting/normalization</p>
+<hr/>
+<h2>6. Backend Module Breakdown</h2>
+<h3>6.1 Server Bootstrap</h3>
+<ul>
+<li>`Server/server.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Loads environment variables</li>
+<li>Connects to MongoDB</li>
+<li>Creates Express app</li>
+<li>Configures Socket.IO</li>
+<li>Registers middleware</li>
+<li>Mounts API routes</li>
+<li>Starts recurring background jobs</li>
+</ul>
+<h3>6.2 Authentication and User Management</h3>
+<ul>
+<li>`Auth.controllers.js`</li>
+<li>`Authroutes.js`</li>
+<li>`authMiddleware.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Signup</li>
+<li>Login</li>
+<li>JWT token handling</li>
+<li>Current user fetch</li>
+<li>Profile updates</li>
+<li>Password change</li>
+<li>Subscription plan endpoints</li>
+<li>Stripe subscription checkout</li>
+<li>Stripe subscription sync</li>
+<li>Test bypass upgrade</li>
+</ul>
+<h3>6.3 Ride Offers</h3>
+<ul>
+<li>`RideOfferController.js`</li>
+<li>`RideOfferRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Create driver ride offers</li>
+<li>Update and cancel offers</li>
+<li>List available offers</li>
+<li>Get driver-owned offers</li>
+</ul>
+<h3>6.4 Ride Requests</h3>
+<ul>
+<li>`RideRequestController.js`</li>
+<li>`RideRequestroutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Rider ride requests</li>
+<li>Open driver request list</li>
+<li>Driver counter offers</li>
+<li>Driver rejection flow</li>
+<li>Rider counter-response flow</li>
+</ul>
+<h3>6.5 Rides / Booking Compatibility Layer</h3>
+<ul>
+<li>`CompatRidesController.js`</li>
+<li>`RidesRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Search rides</li>
+<li>Search by destination</li>
+<li>Nearby ride discovery</li>
+<li>Direct booking flow</li>
+<li>Active ride resolution</li>
+</ul>
+<h3>6.6 Booking Management</h3>
+<ul>
+<li>`BookingController.js`</li>
+<li>`BookingRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Create and cancel bookings</li>
+<li>Fetch rider and driver bookings</li>
+<li>Update booking statuses</li>
+<li>Arrival, pickup, live, completion transitions</li>
+<li>Spending summary</li>
+<li>Earnings summary</li>
+<li>Emissions report creation on completion</li>
+</ul>
+<h3>6.7 Matching</h3>
+<ul>
+<li>`MatchingController.js`</li>
+<li>`MatchRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Ride-to-request matching</li>
+<li>Match creation</li>
+<li>Match detail lookup</li>
+<li>Match lifecycle updates</li>
+</ul>
+<h3>6.8 Payments</h3>
+<ul>
+<li>`PaymentController.js`</li>
+<li>`PaymentRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Create Stripe payment intents for bookings</li>
+<li>Confirm payment</li>
+<li>Webhook processing</li>
+<li>Refund payment</li>
+<li>Driver payout initiation</li>
+<li>Payment status queries</li>
+</ul>
+<h3>6.9 Emissions</h3>
+<ul>
+<li>`EmissionController.js`</li>
+<li>`EmissionsCompatController.js`</li>
+<li>`EmissionsRoutes.js`</li>
+<li>`EmissionRouts.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Get emissions reports</li>
+<li>Get emissions statistics</li>
+<li>Get user emissions history</li>
+<li>Format emissions output for frontend dashboards</li>
+</ul>
+<h3>6.10 Chat and Notifications</h3>
+<ul>
+<li>`ChatController.js`</li>
+<li>`ChatRoutes.js`</li>
+<li>`NotificationsController.js`</li>
+<li>`NotificationsRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Booking-based chat</li>
+<li>Message read state</li>
+<li>Notifications retrieval</li>
+<li>Mark read / read-all flows</li>
+<li>Real-time event delivery</li>
+</ul>
+<h3>6.11 History and Reviews</h3>
+<ul>
+<li>`historyController.js`</li>
+<li>`historyRoutes.js`</li>
+<li>`ReviewsController.js`</li>
+<li>`ReviewsRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Ride history</li>
+<li>Booking history</li>
+<li>Emissions history</li>
+<li>Ratings history</li>
+<li>Create and retrieve reviews</li>
+</ul>
+<h3>6.12 Community / User Profile</h3>
+<ul>
+<li>`UsersController.js`</li>
+<li>`UsersRoutes.js`</li>
+</ul>
+<p>Responsibilities:</p>
+<ul>
+<li>Community data</li>
+<li>Public user profile access</li>
+</ul>
+<hr/>
+<h2>7. Database Models</h2>
+<p>Main models used in the system:</p>
+<ul>
+<li>`User`</li>
+</ul>
+<p>  - Authentication, profile, subscription, ratings, preferences, vehicle info</p>
+<ul>
+<li>`RideOffer`</li>
+</ul>
+<p>  - Driver published ride listing</p>
+<ul>
+<li>`RideRequest`</li>
+</ul>
+<p>  - Rider ride request</p>
+<ul>
+<li>`Booking`</li>
+</ul>
+<p>  - Final booking between rider and driver</p>
+<ul>
+<li>`Match`</li>
+</ul>
+<p>  - Matching layer between requests and offers</p>
+<ul>
+<li>`Payment`</li>
+</ul>
+<p>  - Payment records and payout/refund state</p>
+<ul>
+<li>`EmissionReport`</li>
+</ul>
+<p>  - CO2 savings and environmental metrics</p>
+<ul>
+<li>`Review`</li>
+</ul>
+<p>  - Ratings and review comments</p>
+<ul>
+<li>`Notification`</li>
+</ul>
+<p>  - Notification feed and state</p>
+<ul>
+<li>Chat/message-related model(s)</li>
+</ul>
+<p>  - Booking-based messaging persistence</p>
+<hr/>
+<h2>8. Booking Flow Explanation</h2>
+<h3>Rider Direct Booking Flow</h3>
+<p>1. Rider finds a ride in <code>FindRide.tsx</code></p>
+<p>2. Rider chooses seats and payment method</p>
+<p>3. Frontend calls <code>POST /api/rides/book-direct</code></p>
+<p>4. Backend:</p>
+<p>   - validates available seats</p>
+<p>   - validates subscription usage limits</p>
+<p>   - creates a match record</p>
+<p>   - creates a booking</p>
+<p>   - reduces seat availability on the offer</p>
+<p>5. If payment method is Stripe:</p>
+<p>   - frontend calls <code>POST /api/payments/split</code></p>
+<p>   - Stripe payment intent is created</p>
+<p>   - rider completes payment in Stripe modal</p>
+<p>   - frontend confirms via <code>POST /api/payments/confirm</code></p>
+<p>   - booking becomes confirmed/processed</p>
+<p>6. Driver receives a realtime event for the new booking</p>
+<h3>Driver Request-Based Booking Flow</h3>
+<p>1. Rider creates a ride request</p>
+<p>2. Driver views request in <code>DriverBookings.tsx</code></p>
+<p>3. Driver can:</p>
+<p>   - accept</p>
+<p>   - reject</p>
+<p>   - send counter offer</p>
+<p>4. If accepted or matched:</p>
+<p>   - booking and/or match records are updated</p>
+<p>   - payment and trip flow continue</p>
+<h3>Live Ride Flow</h3>
+<p>1. Driver marks arrival</p>
+<p>2. Driver marks rider picked up</p>
+<p>3. Ride becomes live</p>
+<p>4. On completion:</p>
+<p>   - booking status updates to completed</p>
+<p>   - payment is marked processed</p>
+<p>   - emissions report is created</p>
+<p>   - driver payout logic may execute</p>
+<hr/>
+<h2>9. Emissions Logic Explanation</h2>
+<p>The project tracks estimated CO2 savings from shared rides compared to solo driving.</p>
+<p>Current baseline logic:</p>
+<ul>
+<li>baseline carbon factor: `0.171 kg CO2/km`</li>
+<li>solo occupancy baseline: `1.5`</li>
+<li>shared occupancy baseline: `1.0`</li>
+</ul>
+<p>Simplified formula:</p>
+<p><code>Savings = distanceKm x 0.171 x (1.5 - 1.0)</code></p>
+<p>Emissions are shown in:</p>
+<ul>
+<li>Rider overview</li>
+<li>Emissions dashboard</li>
+<li>Wallet summary</li>
+<li>Ride completion and historical reports</li>
+</ul>
+<p>Data source:</p>
+<ul>
+<li>Emissions reports are created on ride completion</li>
+<li>Statistics are aggregated from `EmissionReport` records</li>
+</ul>
+<hr/>
+<h2>10. Billing and Subscription System</h2>
+<p>Plans:</p>
+<ul>
+<li>Free</li>
+<li>Plus</li>
+<li>Pro</li>
+</ul>
+<p>Implementation files:</p>
+<ul>
+<li>`client/src/lib/plans.ts`</li>
+<li>`client/src/pages/dashboard/SubscriptionPage.tsx`</li>
+<li>`Server/controllers/Auth.controllers.js`</li>
+<li>`Server/utils/subscriptionUsage.js`</li>
+</ul>
+<h3>Subscription Features</h3>
+<ul>
+<li>Usage caps per plan</li>
+<li>Stripe subscription checkout for Plus and Pro</li>
+<li>Stripe success/cancel redirect handling</li>
+<li>Subscription sync from Stripe session</li>
+<li>Test bypass for client/testing that upgrades current user to Pro</li>
+</ul>
+<h3>Usage-Limited Actions</h3>
+<p>The system enforces monthly caps for:</p>
+<ul>
+<li>ride requests</li>
+<li>bookings</li>
+<li>ride offers</li>
+</ul>
+<p>Backend usage enforcement is handled by:</p>
+<ul>
+<li>`ensureSubscriptionOnUser`</li>
+<li>`fetchUsageCounts`</li>
+<li>`assertUsageAllowed`</li>
+</ul>
+<hr/>
+<h2>11. Real-Time Features</h2>
+<p>Real-time events are managed through Socket.IO.</p>
+<p>Primary realtime features:</p>
+<ul>
+<li>chat messaging</li>
+<li>booking status updates</li>
+<li>driver location updates</li>
+<li>route deviation alerts</li>
+<li>new booking notifications</li>
+<li>live ride notifications</li>
+</ul>
+<p>Socket room patterns:</p>
+<ul>
+<li>`user:&lt;userId&gt;`</li>
+<li>`driver:&lt;userId&gt;`</li>
+<li>`chat:&lt;bookingId&gt;`</li>
+<li>`ride:&lt;rideId&gt;`</li>
+</ul>
+<p>Relevant files:</p>
+<ul>
+<li>`Server/server.js`</li>
+<li>`client/src/components/RealTimeNotifications.tsx`</li>
+<li>`client/src/pages/dashboard/Messages.tsx`</li>
+<li>`client/src/pages/dashboard/LiveRide.tsx`</li>
+<li>`client/src/pages/dashboard/MyRides.tsx`</li>
+<li>`client/src/pages/dashboard/DriverBookings.tsx`</li>
+</ul>
+<hr/>
+<h2>12. API Summary</h2>
+<h3>Authentication</h3>
+<p>Base: <code>/api/auth</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`POST /signup`</li>
+<li>`POST /login`</li>
+<li>`GET /me`</li>
+<li>`PATCH /profile`</li>
+<li>`PATCH /change-password`</li>
+<li>`GET /subscription/plans`</li>
+<li>`POST /subscription/checkout`</li>
+<li>`POST /subscription/sync`</li>
+<li>`POST /subscription/cancel`</li>
+<li>`POST /subscription/dev-upgrade`</li>
+</ul>
+<h3>Bookings</h3>
+<p>Base: <code>/api/bookings</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`POST /`</li>
+<li>`GET /`</li>
+<li>`GET /:id`</li>
+<li>`DELETE /:id`</li>
+<li>`PATCH /:id/status`</li>
+<li>`PATCH /:id/arrived`</li>
+<li>`PATCH /:id/picked-up`</li>
+<li>`PATCH /:id/completed`</li>
+<li>`GET /summary/spending`</li>
+<li>`GET /summary/earnings`</li>
+</ul>
+<h3>Payments</h3>
+<p>Base: <code>/api/payments</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`POST /split`</li>
+<li>`POST /confirm`</li>
+<li>`GET /:paymentId`</li>
+<li>`POST /refund/:paymentId`</li>
+<li>`POST /webhooks/stripe`</li>
+<li>`POST /account`</li>
+<li>`POST /payout/:paymentId`</li>
+</ul>
+<h3>Ride Offers</h3>
+<p>Base: <code>/api/rides/offers</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`GET /`</li>
+<li>`GET /me`</li>
+<li>`POST /`</li>
+<li>`GET /:id`</li>
+<li>`PATCH /:id/status`</li>
+<li>`PUT /:id`</li>
+<li>`POST /:id/cancel`</li>
+</ul>
+<h3>Ride Requests</h3>
+<p>Base: <code>/api/rides/requests</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`POST /`</li>
+<li>`PUT /:id`</li>
+<li>`GET /me`</li>
+<li>`GET /driver/open`</li>
+<li>`POST /:id/reject`</li>
+<li>`POST /:id/counter`</li>
+<li>`POST /:id/counter/respond`</li>
+<li>`POST /:id/cancel`</li>
+</ul>
+<h3>Rides Compatibility / Search</h3>
+<p>Base: <code>/api/rides</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`GET /active`</li>
+<li>`GET /offers`</li>
+<li>`GET /search-dest`</li>
+<li>`POST /book-direct`</li>
+</ul>
+<h3>Chat</h3>
+<p>Base: <code>/api/chat</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`POST /`</li>
+<li>`GET /:bookingId`</li>
+<li>`DELETE /:messageId`</li>
+<li>`POST /:bookingId/read`</li>
+</ul>
+<h3>Emissions</h3>
+<p>Base: <code>/api/emissions</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`GET /me`</li>
+<li>`GET /history`</li>
+<li>`GET /:rideId`</li>
+</ul>
+<h3>Notifications</h3>
+<p>Base: <code>/api/notifications</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`GET /`</li>
+<li>`PATCH /read-all`</li>
+<li>`PATCH /:id/read`</li>
+</ul>
+<h3>Reviews</h3>
+<p>Base: <code>/api/reviews</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`POST /`</li>
+<li>`GET /user/:userId`</li>
+<li>`GET /history`</li>
+<li>`GET /:id`</li>
+<li>`PUT /:id`</li>
+<li>`DELETE /:id`</li>
+</ul>
+<h3>History</h3>
+<p>Base: <code>/api/history</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`GET /rides`</li>
+<li>`GET /bookings`</li>
+<li>`GET /emissions`</li>
+<li>`GET /ratings`</li>
+<li>`GET /ride/:id`</li>
+<li>`PATCH /bookings/:id/hide`</li>
+<li>`PATCH /bookings/clear`</li>
+<li>`PATCH /rides/:id/hide`</li>
+<li>`PATCH /rides/clear`</li>
+</ul>
+<h3>Community / Users</h3>
+<p>Base: <code>/api/users</code></p>
+<p>Main endpoints:</p>
+<ul>
+<li>`GET /community`</li>
+<li>`GET /:id/profile`</li>
+</ul>
+<hr/>
+<h2>13. Environment Variables and API Keys Used</h2>
+<h3>Backend Environment Variables</h3>
+<p>Used in <code>Server/.env</code></p>
+<ul>
+<li>`PORT`</li>
+</ul>
+<p>  - backend server port</p>
+<ul>
+<li>`NODE_ENV`</li>
+</ul>
+<p>  - runtime mode</p>
+<ul>
+<li>`MONGODB_URI`</li>
+</ul>
+<p>  - MongoDB database connection</p>
+<ul>
+<li>`JWT_SECRET`</li>
+</ul>
+<p>  - JWT signing secret</p>
+<ul>
+<li>`JWT_EXPIRES_IN`</li>
+</ul>
+<p>  - token expiry</p>
+<ul>
+<li>`REFRESH_TOKEN_SECRET`</li>
+</ul>
+<p>  - refresh token secret</p>
+<ul>
+<li>`CLIENT_URL`</li>
+</ul>
+<p>  - client origin</p>
+<ul>
+<li>`SERVER_URL`</li>
+</ul>
+<p>  - backend origin</p>
+<ul>
+<li>`FRONTEND_URL`</li>
+</ul>
+<p>  - frontend redirect base for Stripe checkout</p>
+<ul>
+<li>`STRIPE_SECRET_KEY`</li>
+</ul>
+<p>  - Stripe secret API key</p>
+<ul>
+<li>`STRIPE_PUBLISHABLE_KEY`</li>
+</ul>
+<p>  - server-stored Stripe publishable value</p>
+<ul>
+<li>`STRIPE_WEBHOOK_SECRET`</li>
+</ul>
+<p>  - Stripe webhook signature validation</p>
+<ul>
+<li>`STRIPE_PRICE_PLUS`</li>
+</ul>
+<p>  - Stripe recurring price ID for Plus plan</p>
+<ul>
+<li>`STRIPE_PRICE_PRO`</li>
+</ul>
+<p>  - Stripe recurring price ID for Pro plan</p>
+<ul>
+<li>`ALLOW_DEV_STRIPE_BYPASS`</li>
+</ul>
+<p>  - enables backend test plan bypass</p>
+<ul>
+<li>`AUTH0_SECRET`</li>
+<li>`AUTH0_BASE_URL`</li>
+<li>`AUTH0_CLIENT_ID`</li>
+<li>`AUTH0_ISSUER_BASE_URL`</li>
+</ul>
+<p>  - Auth0-related configuration</p>
+<ul>
+<li>`MAPBOX_API_KEY`</li>
+</ul>
+<p>  - reserved for route/map provider support</p>
+<h3>Frontend Environment Variables</h3>
+<p>Used in <code>client/.env</code></p>
+<ul>
+<li>`VITE_API_URL`</li>
+</ul>
+<p>  - frontend API base URL</p>
+<ul>
+<li>`VITE_GOOGLE_MAPS_API_KEY`</li>
+</ul>
+<p>  - Google Maps JS usage</p>
+<ul>
+<li>`VITE_STRIPE_PUBLISHABLE_KEY`</li>
+</ul>
+<p>  - frontend Stripe publishable key</p>
+<ul>
+<li>`VITE_DEV_PLAN_BYPASS`</li>
+</ul>
+<p>  - frontend toggle for showing test bypass button</p>
+<h3>External Services Used</h3>
+<ul>
+<li>MongoDB Atlas</li>
+<li>Stripe</li>
+<li>Google Maps</li>
+<li>OpenStreetMap / Nominatim</li>
+<li>Socket.IO</li>
+<li>Auth0-related placeholders/configuration</li>
+</ul>
+<hr/>
+<h2>14. Security Notes</h2>
+<ul>
+<li>JWT-based authentication is used for protected APIs</li>
+<li>Socket authentication uses JWT in handshake auth</li>
+<li>Stripe webhook route is mounted before JSON parsing for signature validation</li>
+<li>Protected routes use middleware to validate access</li>
+<li>Role-based checks are applied for rider-only and driver-only routes</li>
+</ul>
+<p>Recommended production hardening:</p>
+<ul>
+<li>move all secrets to a secure deployment secret manager</li>
+<li>rotate exposed test keys before production launch</li>
+<li>restrict CORS origins to production domains only</li>
+<li>implement rate limiting</li>
+<li>add audit logging for payment/refund/admin-sensitive actions</li>
+</ul>
+<hr/>
+<h2>15. Deployment Notes</h2>
+<p>Typical deployment split:</p>
+<ul>
+<li>Frontend:</li>
+</ul>
+<p>  - Vercel / Netlify / static hosting</p>
+<ul>
+<li>Backend:</li>
+</ul>
+<p>  - Node server on VPS / Render / Railway / similar</p>
+<ul>
+<li>Database:</li>
+</ul>
+<p>  - MongoDB Atlas</p>
+<p>Deployment checklist:</p>
+<ul>
+<li>configure frontend production URL</li>
+<li>configure backend production URL</li>
+<li>set all JWT secrets</li>
+<li>set MongoDB URI</li>
+<li>set Stripe keys and webhook secret</li>
+<li>configure allowed CORS origins</li>
+<li>test Socket.IO connectivity</li>
+<li>test Stripe checkout and webhook callbacks</li>
+</ul>
+<hr/>
+<h2>16. Current Product Strengths</h2>
+<ul>
+<li>Full dual-role workflow for riders and drivers</li>
+<li>Rich dashboard-based UX</li>
+<li>Realtime chat and ride updates</li>
+<li>Subscription monetization</li>
+<li>Environmental impact tracking</li>
+<li>Historical trip and financial summaries</li>
+<li>Nearby ride search and map support</li>
+</ul>
+<hr/>
+<h2>17. Known Technical Considerations</h2>
+<ul>
+<li>There are some legacy/compatibility controllers and routes still present</li>
+</ul>
+<p>  - for example emissions and rides compatibility layers</p>
+<ul>
+<li>The codebase contains both old and new flow variants in some places</li>
+<li>Additional backend integration tests would improve long-term stability</li>
+<li>Some areas still rely on derived calculations instead of a single unified source of truth</li>
+</ul>
+<p>These do not prevent the product from functioning, but they are useful future cleanup opportunities.</p>
+<hr/>
+<h2>18. Recommended Future Enhancements</h2>
+<h3>Product Enhancements</h3>
+<ul>
+<li>in-app payout dashboard for drivers</li>
+<li>admin panel</li>
+<li>coupon/promo system</li>
+<li>recurring billing management portal</li>
+<li>saved favorite routes</li>
+<li>driver/rider verification workflows</li>
+<li>SOS / emergency contact integration</li>
+<li>better route optimization and ETA prediction</li>
+<li>waitlist and surge-based ride suggestions</li>
+<li>trip rescheduling flows</li>
+</ul>
+<h3>Technical Enhancements</h3>
+<ul>
+<li>add automated integration testing for booking/payment flows</li>
+<li>unify legacy and compatibility controllers</li>
+<li>centralize emissions calculation logic in one shared module</li>
+<li>centralize payment status transition rules</li>
+<li>add proper job queues for background tasks</li>
+<li>improve websocket reconnect/session persistence</li>
+<li>add monitoring and structured logging</li>
+<li>split frontend bundle for performance</li>
+</ul>
+<h3>Analytics Enhancements</h3>
+<ul>
+<li>conversion analytics from landing page to signup</li>
+<li>billing funnel analytics</li>
+<li>driver supply vs rider demand heatmaps</li>
+<li>emissions dashboards by city/region</li>
+</ul>
+<hr/>
+<h2>19. Suggested Client Handover Notes</h2>
+<p>When presenting this project to the client, it is recommended to explain it as:</p>
+<ul>
+<li>a complete ride-sharing and carpool platform</li>
+<li>built with separate rider and driver operational dashboards</li>
+<li>including live trip handling, chat, billing, and sustainability tracking</li>
+<li>with room for future scale through modular backend controllers and route-based APIs</li>
+</ul>
+<p>Key client-facing selling points:</p>
+<ul>
+<li>supports both rider and driver journeys end to end</li>
+<li>includes monetization through subscription billing</li>
+<li>includes sustainability reporting for brand value and impact visibility</li>
+<li>supports realtime communication and ride monitoring</li>
+</ul>
+<hr/>
+<h2>20. Final Summary</h2>
+<p>CarpConnect is a full-featured ride-sharing application with:</p>
+<ul>
+<li>modern frontend architecture</li>
+<li>modular backend APIs</li>
+<li>real-time trip communication</li>
+<li>booking and payment flows</li>
+<li>plan-based subscription access</li>
+<li>emissions and sustainability reporting</li>
+<li>role-based dashboards for riders and drivers</li>
+</ul>
+<p>This document can be used as the final client handover reference for technical overview, product structure, integrations, and future roadmap.</p>
+</body></html>
