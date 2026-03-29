@@ -74,7 +74,12 @@ const calculateEmissionsSavings = (distanceKm) => {
   const EMISSIONS_PER_KM = 0.171; // city / petrol / car
   const solo = distanceKm * EMISSIONS_PER_KM * SOLO_PASSENGERS;
   const carpool = distanceKm * EMISSIONS_PER_KM;
-  return parseFloat((solo - carpool).toFixed(2));
+  const estimatedSavings = parseFloat((solo - carpool).toFixed(2));
+  return {
+    estimatedSavings,
+    soloEmissions: parseFloat(solo.toFixed(2)),
+    carpoolEmissions: parseFloat(carpool.toFixed(2)),
+  };
 };
 
 /**
@@ -230,7 +235,7 @@ const createBooking = asyncHandler(async (req, res) => {
     // Store a numeric fare in Mongo; hydrateBookings normalizes the response shape.
     fare: fareAmount,
     currency,
-    status:        'confirmed',
+    status:        normalizedPaymentMethod === 'stripe' ? 'pending' : 'confirmed',
     paymentStatus: normalizedPaymentMethod === 'stripe' ? 'pending' : 'processed',
     paymentMethod: normalizedPaymentMethod
   });
@@ -314,6 +319,7 @@ const cancelBooking = asyncHandler(async (req, res) => {
   }
 
   booking.status             = 'cancelled';
+  booking.paymentStatus      = booking.paymentStatus === 'processed' ? 'refunded' : 'cancelled';
   booking.cancellationReason = req.body.reason || 'Changed plans';
   booking.cancellationTime   = new Date();
   await booking.save();

@@ -920,12 +920,11 @@ const MyOffers = () => {
   const totalActiveRiders = Object.values(bookingSummaryByOffer).reduce((sum, summary) => sum + summary.confirmedRiders, 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">My Published Rides</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Manage the rides you have offered to others</p>
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900">My Published Rides</h2>
         </div>
         <div className="flex gap-1 p-1 bg-gray-100 rounded-xl overflow-x-auto no-scrollbar w-full sm:w-auto">
           {(["all", "today", "week", "month"] as const).map((tf) => (
@@ -944,37 +943,17 @@ const MyOffers = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
           {stats.map((s) => (
             <div key={s.label} className="bg-white rounded-2xl border border-gray-200 px-4 py-3">
-              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+              <p className={`text-xl font-semibold ${s.color}`}>{s.value}</p>
               <p className="text-xs text-gray-400 font-medium mt-0.5">{s.label}</p>
             </div>
           ))}
           <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3">
-            <p className="text-2xl font-bold text-gray-900">{totalBookedSeats}</p>
+            <p className="text-xl font-semibold text-gray-900">{totalBookedSeats}</p>
             <p className="text-xs text-gray-400 font-medium mt-0.5">Seats Booked</p>
           </div>
           <div className="bg-white rounded-2xl border border-gray-200 px-4 py-3">
-            <p className="text-2xl font-bold text-gray-900">{totalActiveRiders}</p>
+            <p className="text-xl font-semibold text-gray-900">{totalActiveRiders}</p>
             <p className="text-xs text-gray-400 font-medium mt-0.5">Active Riders</p>
-          </div>
-        </div>
-      )}
-
-      {offers.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-200 p-5">
-          <h3 className="text-lg font-bold text-gray-900">Offer Ownership</h3>
-          <div className="grid md:grid-cols-3 gap-4 mt-4 text-sm text-gray-600">
-            <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
-              <p className="font-semibold text-gray-900">Offer Details</p>
-              <p className="mt-1">Each card shows route, seats left, seat usage, preferences, and recurrence.</p>
-            </div>
-            <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
-              <p className="font-semibold text-gray-900">Riders On Offer</p>
-              <p className="mt-1">Use the green details action to see riders attached to that specific offer and their booked seats.</p>
-            </div>
-            <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
-              <p className="font-semibold text-gray-900">Next Step</p>
-              <p className="mt-1">New and accepted rider actions continue in Manage Requests, then pickup moves into Live Ride.</p>
-            </div>
           </div>
         </div>
       )}
@@ -984,7 +963,7 @@ const MyOffers = () => {
         <AnimatePresence mode="popLayout">
           {filtered.length === 0 ? (
             <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="text-center py-20 bg-white rounded-3xl border border-gray-200">
+              className="text-center py-16 bg-white rounded-2xl border border-gray-200">
               <div className="text-5xl mb-4">🚗</div>
               <h3 className="font-bold text-gray-800 text-base mb-1">No rides found</h3>
               <p className="text-gray-400 text-sm">

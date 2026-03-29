@@ -104,9 +104,17 @@ const WalletPage = () => {
     });
 
     const co2ImpactKg = riderBookings.filter(isSuccessfulRidePayment).reduce((sum, b) => {
-        const distanceKm = Number(b?.offer?.estimatedDistanceKm ?? 0) || 0;
-        const seats = Number(b?.seatsRequested ?? 1) || 1;
-        return sum + (distanceKm * 0.192 * seats);
+        const directSaved = Number(
+            b?.emissionsData?.emissionsSavingsKg ??
+            b?.emissionsSavingsKg ??
+            0
+        );
+        if (directSaved > 0) {
+            return sum + directSaved;
+        }
+
+        const distanceKm = Number(b?.offer?.estimatedDistanceKm ?? b?.totalDistanceKm ?? 0) || 0;
+        return sum + (distanceKm * 0.171 * (1.5 - 1.0));
     }, 0);
 
     const exportTransactions = () => {
@@ -149,11 +157,10 @@ const WalletPage = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
                 <div>
-                    <h2 className="text-xl sm:text-2xl font-display font-bold text-foreground">Wallet</h2>
-                    <p className="text-sm text-muted-foreground mt-1">Manage your balance, spending, and savings</p>
+                    <h2 className="text-xl font-semibold text-foreground">Wallet</h2>
                 </div>
                 <div className="flex gap-2 sm:gap-3 flex-wrap w-full sm:w-auto">
                     <Button onClick={exportTransactions} variant="outline" className="gap-2 w-full sm:w-auto"><Download className="w-4 h-4" /> Export</Button>
@@ -165,15 +172,15 @@ const WalletPage = () => {
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-gradient-primary rounded-3xl p-5 sm:p-8 relative overflow-hidden"
+                className="bg-gradient-primary rounded-2xl p-5 sm:p-6 relative overflow-hidden"
             >
                 <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-[80px]" />
                 <div className="absolute bottom-0 left-1/2 w-48 h-48 bg-white/5 rounded-full blur-[60px]" />
                 <div className="relative z-10">
-                    <div className="flex items-start sm:items-center justify-between mb-6 sm:mb-8 gap-3">
+                    <div className="flex items-start sm:items-center justify-between mb-5 gap-3">
                         <div>
-                            <p className="text-white/60 text-sm mb-1">Total Lifetime Spent</p>
-                            <div className="text-2xl sm:text-4xl lg:text-5xl font-display font-bold text-white break-words">
+                            <p className="text-white/60 text-xs mb-1">Total Lifetime Spent</p>
+                            <div className="text-2xl sm:text-3xl lg:text-4xl font-display font-bold text-white break-words">
                                 {riderBookings[0]?.fare?.currency || 'PKR'} {totalSpent.toLocaleString()}
                             </div>
                         </div>
@@ -187,9 +194,9 @@ const WalletPage = () => {
                             { label: "Co2 Impact", value: `${co2ImpactKg.toFixed(1)} kg`, icon: TrendingUp },
                             { label: "This Month", value: `${riderBookings[0]?.fare?.currency || 'PKR'} ${spentThisMonth.toLocaleString()}`, icon: CreditCard },
                         ].map((item) => (
-                            <div key={item.label} className="bg-white/10 rounded-2xl p-4">
+                            <div key={item.label} className="bg-white/10 rounded-2xl p-3">
                                 <item.icon className="w-4 h-4 text-white/60 mb-2" />
-                                <div className="text-lg font-display font-bold text-white">{item.value}</div>
+                                <div className="text-base font-display font-bold text-white">{item.value}</div>
                                 <div className="text-xs text-white/50">{item.label}</div>
                             </div>
                         ))}
@@ -199,12 +206,12 @@ const WalletPage = () => {
 
             {/* Charts */}
             {canUseDetailed ? (
-            <div className="grid lg:grid-cols-2 gap-6">
+            <div className="grid lg:grid-cols-2 gap-4">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.15 }}
-                    className="bg-card rounded-2xl p-6 border border-border/50"
+                    className="bg-card rounded-2xl p-5 border border-border/50"
                 >
                     <h3 className="font-display font-bold text-foreground mb-1">Savings vs Spend</h3>
                     <p className="text-xs text-muted-foreground mb-5">Monthly comparison</p>
@@ -234,7 +241,7 @@ const WalletPage = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="bg-card rounded-2xl p-6 border border-border/50"
+                    className="bg-card rounded-2xl p-5 border border-border/50"
                 >
                     <h3 className="font-display font-bold text-foreground mb-1">Weekly Spend</h3>
                     <p className="text-xs text-muted-foreground mb-5">This month by week</p>
@@ -250,7 +257,7 @@ const WalletPage = () => {
                 </motion.div>
             </div>
             ) : (
-            <div className="rounded-2xl border border-amber-300/60 bg-card p-6">
+            <div className="rounded-2xl border border-amber-300/60 bg-card p-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div>
                         <h3 className="font-display font-bold text-foreground flex items-center gap-2">
@@ -305,7 +312,7 @@ const WalletPage = () => {
                 </div>
             </motion.div>
             ) : (
-            <div className="rounded-2xl border border-border/50 bg-card p-6">
+            <div className="rounded-2xl border border-border/50 bg-card p-4">
                 <p className="text-sm font-semibold text-foreground">Recent Trips & Transactions</p>
                 <p className="text-xs text-muted-foreground mt-1">
                     Locked on Free. Upgrade to Plus for booking history and detailed transaction tracking.

@@ -79,11 +79,10 @@ const Community = () => {
     ];
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl font-display font-bold text-foreground">Community</h2>
-                    <p className="text-sm text-muted-foreground mt-1">Your network of verified drivers and co-riders</p>
+                    <h2 className="text-xl font-semibold text-foreground">Community</h2>
                 </div>
                 <div className="flex -space-x-3 overflow-hidden">
                    {data.topDrivers?.slice(0, 5).map((d: any) => (
@@ -93,31 +92,31 @@ const Community = () => {
             </div>
 
             {/* Community stats */}
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {stats.map((s, i) => (
                     <motion.div
                         key={s.label}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.1 }}
-                        className="bg-card rounded-2xl p-5 border border-border/50"
+                        className="bg-card rounded-2xl p-4 border border-border/50"
                     >
                         <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center mb-3">
                             <s.icon className="w-5 h-5 text-primary" />
                         </div>
-                        <div className={`text-2xl font-display font-bold ${s.color}`}>{s.value}</div>
+                        <div className={`text-xl font-semibold ${s.color}`}>{s.value}</div>
                         <div className="text-xs text-muted-foreground mt-0.5">{s.label}</div>
                     </motion.div>
                 ))}
             </div>
 
             {/* Charts Row */}
-            <div className="grid lg:grid-cols-2 gap-6">
+            <div className="grid gap-4 lg:grid-cols-2">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="bg-card rounded-2xl p-6 border border-border/50"
+                    className="bg-card rounded-2xl p-5 border border-border/50"
                 >
                     <h3 className="font-display font-bold text-foreground mb-1">Community Leaderboard</h3>
                     <p className="text-xs text-muted-foreground mb-5">Top rated members this month</p>
@@ -142,7 +141,7 @@ const Community = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.25 }}
-                    className="bg-card rounded-2xl p-6 border border-border/50"
+                    className="bg-card rounded-2xl p-5 border border-border/50"
                 >
                     <h3 className="font-display font-bold text-foreground mb-1">Community DNA</h3>
                     <p className="text-xs text-muted-foreground mb-4">Core values as rated by members</p>
@@ -173,7 +172,7 @@ const Community = () => {
                             initial={{ opacity: 0, y: 15 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.35 + i * 0.05 }}
-                            className="bg-card rounded-2xl p-5 border border-border/50 hover:border-primary/30 hover:shadow-glow transition-all duration-300"
+                            className="bg-card rounded-2xl p-4 border border-border/50 hover:border-primary/30 hover:shadow-glow transition-all duration-300"
                         >
                             <div className="flex items-start gap-4 mb-4">
                                 <div className="w-12 h-12 rounded-2xl bg-gradient-primary flex items-center justify-center text-white font-bold text-lg shadow-glow overflow-hidden">

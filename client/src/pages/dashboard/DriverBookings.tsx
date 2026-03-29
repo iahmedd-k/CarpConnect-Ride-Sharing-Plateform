@@ -135,7 +135,7 @@ function BookingCard({
       key={booking._id}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`bg-white rounded-2xl p-5 border shadow-sm relative overflow-hidden
+      className={`bg-white rounded-2xl p-4 border shadow-sm relative overflow-hidden
         ${booking.status === "confirmed" ? "border-emerald-300" :
           booking.status === "cancelled" || booking.status === "rejected" ? "border-red-200 opacity-70" :
           "border-amber-200"}`}
@@ -145,7 +145,7 @@ function BookingCard({
       {booking.status === "pending"   && <div className="absolute top-0 right-0 w-16 h-16 bg-amber-50 rounded-bl-full" />}
 
       {/* Rider header */}
-      <div className="flex justify-between items-start mb-4 relative z-10 gap-2">
+      <div className="flex justify-between items-start mb-3 relative z-10 gap-2">
         <div>
           <p className="text-sm font-bold text-gray-900">{booking.rider?.name || 'Rider'}</p>
           <p className="text-xs text-gray-400 mt-0.5 break-words">{originLabel} → {destLabel}</p>
@@ -156,7 +156,7 @@ function BookingCard({
       </div>
 
       {/* Route & details */}
-      <div className="space-y-2 mb-4 text-xs">
+      <div className="space-y-2 mb-3 text-xs">
         <div className="flex items-start justify-between gap-2">
           <span className="text-gray-400 flex items-center gap-1 flex-shrink-0">
             <MapPin size={11} /> From
@@ -198,14 +198,14 @@ function BookingCard({
             disabled={isBusy}
             onClick={() => onStatus(booking._id, "cancelled")}
             variant="outline"
-            className="flex-1 h-9 border-red-200 text-red-500 hover:bg-red-50 text-xs font-semibold"
+            className="flex-1 h-8.5 border-red-200 text-red-500 hover:bg-red-50 text-xs font-semibold"
           >
             <XCircle className="w-4 h-4 mr-1" /> Reject
           </Button>
           <Button
             disabled={isBusy}
             onClick={() => onStatus(booking._id, "confirm")}
-            className="flex-1 h-9 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold"
+            className="flex-1 h-8.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold"
           >
             {isBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle className="w-4 h-4 mr-1" /> Accept</>}
           </Button>
@@ -215,13 +215,13 @@ function BookingCard({
       {booking.status === "confirmed" && (
         <div className="flex flex-col gap-2">
           <Button
-            className="w-full h-9 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-xs font-semibold border border-emerald-200"
+            className="w-full h-8.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-xs font-semibold border border-emerald-200"
             onClick={() => { window.location.href = "/driver-dashboard?tab=messages"; }}
           >
             <MessageSquare className="w-4 h-4 mr-2" /> Open Chat
           </Button>
           <Button
-            className="w-full h-9 bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-semibold border border-blue-200"
+            className="w-full h-8.5 bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-semibold border border-blue-200"
             onClick={() => onLive(booking)}
           >
             <Navigation className="w-4 h-4 mr-2" /> Pickup Flow
@@ -232,7 +232,7 @@ function BookingCard({
       {booking.status === "completed" && (
         <Button
           onClick={() => onReview(booking)}
-          className="w-full h-9 bg-amber-50 text-amber-600 hover:bg-amber-100 text-xs font-semibold border border-amber-200"
+          className="w-full h-8.5 bg-amber-50 text-amber-600 hover:bg-amber-100 text-xs font-semibold border border-amber-200"
         >
           <Star className="w-4 h-4 mr-2" /> Rate Rider
         </Button>
@@ -338,8 +338,8 @@ function RideRequestCard({
   const hasCompatibleOffer = Array.isArray(req?.compatibleOffers) && req.compatibleOffers.length > 0;
 
   return (
-    <div className="rounded-2xl border border-gray-200 p-4 bg-white">
-      <div className="flex items-start justify-between gap-3 mb-3">
+    <div className="rounded-2xl border border-gray-200 p-3.5 bg-white">
+      <div className="flex items-start justify-between gap-3 mb-2.5">
         <div>
           <p className="text-sm font-bold text-gray-900">{req.rider?.name || "Rider"}</p>
           <p className="text-xs text-gray-400 mt-0.5">
@@ -351,7 +351,7 @@ function RideRequestCard({
         </span>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs mb-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs mb-2.5">
         <div className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2">
           <p className="text-gray-400 mb-0.5">Earliest</p>
           <p className="font-semibold text-gray-700">{fmtTime(req.earliestDeparture)}</p>
@@ -369,7 +369,7 @@ function RideRequestCard({
       </div>
 
       {/* Counter fare */}
-      <div className="flex items-center gap-2 mb-3 flex-wrap">
+      <div className="flex items-center gap-2 mb-2.5 flex-wrap">
         <input
           type="number"
           min={1}
@@ -655,54 +655,31 @@ const DriverBookings = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="bg-white rounded-2xl border border-gray-200 p-3.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Published Offers</p>
-          <p className="text-2xl font-bold text-gray-900">{activeOffersCount}</p>
-          <p className="text-xs text-gray-400 mt-1">Visible in My Offers</p>
+          <p className="text-xl font-semibold text-gray-900">{activeOffersCount}</p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+        <div className="bg-white rounded-2xl border border-gray-200 p-3.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Open Seats</p>
-          <p className="text-2xl font-bold text-gray-900">{openSeatsCount}</p>
-          <p className="text-xs text-gray-400 mt-1">Still available across your offers</p>
+          <p className="text-xl font-semibold text-gray-900">{openSeatsCount}</p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+        <div className="bg-white rounded-2xl border border-gray-200 p-3.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Accepted Riders</p>
-          <p className="text-2xl font-bold text-gray-900">{acceptedBookingsCount}</p>
-          <p className="text-xs text-gray-400 mt-1">Move these riders into pickup flow</p>
+          <p className="text-xl font-semibold text-gray-900">{acceptedBookingsCount}</p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+        <div className="bg-white rounded-2xl border border-gray-200 p-3.5">
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Completed Trips</p>
-          <p className="text-2xl font-bold text-gray-900">{completedBookingsCount}</p>
-          <p className="text-xs text-gray-400 mt-1">Ready for rider reviews</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-gray-200 p-5">
-        <h3 className="text-lg font-bold text-gray-900">How Driver Flow Works</h3>
-        <div className="grid md:grid-cols-3 gap-4 mt-4 text-sm text-gray-600">
-          <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
-            <p className="font-semibold text-gray-900">1. My Offers</p>
-            <p className="mt-1">Your created offers, remaining seats, and offer details stay there.</p>
-          </div>
-          <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
-            <p className="font-semibold text-gray-900">2. Manage Requests</p>
-            <p className="mt-1">Open rider requests, counter offers, and accepted rider cards are handled here.</p>
-          </div>
-          <div className="rounded-2xl bg-gray-50 border border-gray-100 p-4">
-            <p className="font-semibold text-gray-900">3. Live Ride</p>
-            <p className="mt-1">After pickup starts, use Live Ride for arrival, picked-up riders, route progress, and drop-offs.</p>
-          </div>
+          <p className="text-xl font-semibold text-gray-900">{completedBookingsCount}</p>
         </div>
       </div>
 
       {/* ── Open Rider Requests ── */}
-      <div className="bg-white rounded-2xl border border-gray-200 p-5">
-        <div className="mb-4">
-          <h3 className="text-lg font-bold text-gray-900">Open Rider Requests</h3>
-          <p className="text-xs text-gray-400 mt-0.5">Compare requested seats and rider budget before accepting.</p>
+      <div className="bg-white rounded-2xl border border-gray-200 p-4">
+        <div className="mb-3">
+          <h3 className="text-base font-semibold text-gray-900">Open Rider Requests</h3>
         </div>
 
         {requestsLoading ? (
@@ -715,7 +692,7 @@ const DriverBookings = () => {
             <p className="text-sm text-gray-400">No open rider requests right now.</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid gap-3 xl:grid-cols-2">
             {rideRequests.filter(r => r.status === 'open').map(req => (
               <RideRequestCard
                 key={req._id}
@@ -733,10 +710,9 @@ const DriverBookings = () => {
       </div>
 
       {/* ── Bookings header + filter ── */}
-      <div className="flex items-start justify-between flex-wrap gap-4">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Manage Requests</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Review and manage rider requests for your rides</p>
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Manage Requests</h2>
         </div>
         <div className="flex gap-1 p-1 bg-gray-100 rounded-xl overflow-x-auto no-scrollbar w-full sm:w-auto">
           {(["all", "today", "week", "month"] as const).map(tf => (
@@ -755,15 +731,15 @@ const DriverBookings = () => {
 
       {/* ── Booking cards ── */}
       {filtered.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-gray-200">
+        <div className="text-center py-16 bg-white rounded-2xl border border-dashed border-gray-200">
           <div className="text-4xl mb-4">📭</div>
-          <h3 className="text-base font-bold text-gray-800 mb-1">No Bookings Found</h3>
+          <h3 className="text-base font-semibold text-gray-800 mb-1">No Bookings Found</h3>
           <p className="text-gray-400 text-sm">
             {timeFilter !== "all" ? "Try changing the time filter." : "No bookings yet."}
           </p>
         </div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-4">
           {bookingGroupEntries.map(([offerId, group]) => {
             const offer = group.offer;
             const routeLabel = offer
@@ -773,10 +749,10 @@ const DriverBookings = () => {
             const seatDemand = group.bookings.reduce((sum: number, booking: any) => sum + Number(booking.seatCount || booking.seatsRequested || booking.seats || 1), 0);
 
             return (
-              <div key={offerId} className="bg-white rounded-3xl border border-gray-200 p-5">
-                <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
+              <div key={offerId} className="bg-white rounded-2xl border border-gray-200 p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
                   <div>
-                    <h3 className="text-lg font-bold text-gray-900">{routeLabel}</h3>
+                    <h3 className="text-base font-semibold text-gray-900">{routeLabel}</h3>
                     <p className="text-xs text-gray-400 mt-1">
                       {offer ? `${fmtDate(offer.departureTime)} • ${offer.seatsAvailable ?? 0} seats left` : "Linked bookings for this offer"}
                     </p>
@@ -793,7 +769,7 @@ const DriverBookings = () => {
                     </span>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {group.bookings.map(booking => (
                     <BookingCard
                       key={booking._id}

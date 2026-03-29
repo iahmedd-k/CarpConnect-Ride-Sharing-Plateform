@@ -158,7 +158,7 @@ const Messages = () => {
 
 
     return (
-        <div className="space-y-4">
+        <div className="h-full space-y-4 overflow-hidden">
             <div className="bg-card rounded-2xl border border-border/50 overflow-hidden" style={{ height: "calc(100vh - 170px)", minHeight: "420px" }}>
                 <div className="flex h-full flex-col md:flex-row">
                     {/* Sidebar */}

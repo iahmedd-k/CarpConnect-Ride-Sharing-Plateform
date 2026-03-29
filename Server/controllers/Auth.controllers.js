@@ -44,6 +44,20 @@ const PLAN_BY_STRIPE_PRICE = Object.entries(STRIPE_PRICE_BY_PLAN).reduce((acc, [
   return acc;
 }, {});
 
+const resolveDashboardPath = (value, userRole = '') => {
+  const requested = String(value || '').trim();
+  if (requested === '/dashboard' || requested === '/driver-dashboard') {
+    return requested;
+  }
+  return userRole === 'driver' ? '/driver-dashboard' : '/dashboard';
+};
+
+const buildSubscriptionBillingConfig = () => ({
+  stripeAvailable: Boolean(stripe),
+  devBypassEnabled: isDevBypassEnabled(),
+  supportedCheckoutPlans: ['plus', 'pro']
+});
+
 const sanitizeUser = (user) => ({
   _id: user._id,
   name: user.name,
@@ -161,8 +175,10 @@ const getMe = asyncHandler(async (req, res) => {
     success: true,
     data: {
       user: sanitizeUser(req.user),
+      subscription,
       usage: buildUsageSummary(subscription, usage),
-      plans: Object.values(PLAN_CATALOG)
+      plans: Object.values(PLAN_CATALOG),
+      billingConfig: buildSubscriptionBillingConfig()
     }
   });
 });
@@ -198,8 +214,11 @@ const updateProfile = asyncHandler(async (req, res) => {
   });
 });
 
-const isDevBypassEnabled = () =>
-  process.env.ALLOW_DEV_STRIPE_BYPASS === 'true' && process.env.NODE_ENV !== 'production';
+const isDevBypassEnabled = () => {
+  const raw = String(process.env.ALLOW_DEV_STRIPE_BYPASS || '').trim().toLowerCase();
+  if (!raw) return true;
+  return raw !== 'false';
+};
 
 // @desc    List available subscription plans
 // @route   GET /api/auth/subscription/plans
@@ -208,7 +227,8 @@ const getSubscriptionPlans = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     data: {
-      plans: Object.values(PLAN_CATALOG)
+      plans: Object.values(PLAN_CATALOG),
+      billingConfig: buildSubscriptionBillingConfig()
     }
   });
 });
@@ -230,26 +250,34 @@ const createSubscriptionCheckout = asyncHandler(async (req, res) => {
   }
 
   const priceId = STRIPE_PRICE_BY_PLAN[requestedPlan];
-  if (!priceId) {
-    return res.status(500).json({
-      success: false,
-      message: `Stripe price is missing for ${requestedPlan}. Set STRIPE_PRICE_${requestedPlan.toUpperCase()}.`
-    });
-  }
 
   const frontendUrl = process.env.FRONTEND_URL || req.headers.origin || 'http://localhost:8080';
+  const dashboardPath = resolveDashboardPath(req.body?.dashboardPath, req.user?.role);
   const existingCustomerId = String(req.user?.subscription?.stripeCustomerId || '').trim();
 
   const session = await stripe.checkout.sessions.create({
     mode: 'subscription',
     customer: existingCustomerId || undefined,
     customer_email: existingCustomerId ? undefined : req.user.email,
-    success_url: `${frontendUrl}/dashboard?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${frontendUrl}/dashboard?tab=subscription&checkout=cancelled`,
-    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: `${frontendUrl}${dashboardPath}?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${frontendUrl}${dashboardPath}?tab=subscription&checkout=cancelled`,
+    line_items: priceId
+      ? [{ price: priceId, quantity: 1 }]
+      : [{
+          price_data: {
+            currency: 'usd',
+            recurring: { interval: 'month' },
+            unit_amount: Number(PLAN_CATALOG[requestedPlan]?.monthlyPriceUsd || 0) * 100,
+            product_data: {
+              name: `CarpConnect ${PLAN_CATALOG[requestedPlan]?.label || requestedPlan}`
+            }
+          },
+          quantity: 1
+        }],
     metadata: {
       userId: String(req.user._id),
-      plan: requestedPlan
+      plan: requestedPlan,
+      dashboardPath
     },
     allow_promotion_codes: true
   });
@@ -258,7 +286,8 @@ const createSubscriptionCheckout = asyncHandler(async (req, res) => {
     success: true,
     data: {
       sessionId: session.id,
-      url: session.url
+      url: session.url,
+      dashboardPath
     }
   });
 });
@@ -297,7 +326,7 @@ const syncSubscriptionFromStripe = asyncHandler(async (req, res) => {
 
   const stripeSubscription = session.subscription;
   const stripePriceId = stripeSubscription?.items?.data?.[0]?.price?.id || '';
-  const plan = PLAN_BY_STRIPE_PRICE[stripePriceId];
+  const plan = normalizePlan(session?.metadata?.plan || PLAN_BY_STRIPE_PRICE[stripePriceId]);
   if (!plan) {
     return res.status(400).json({
       success: false,
@@ -331,7 +360,9 @@ const syncSubscriptionFromStripe = asyncHandler(async (req, res) => {
     success: true,
     data: {
       user: sanitizeUser(req.user),
-      usage: buildUsageSummary(req.user.subscription, usage)
+      subscription: req.user.subscription,
+      usage: buildUsageSummary(req.user.subscription, usage),
+      billingConfig: buildSubscriptionBillingConfig()
     }
   });
 });
@@ -371,8 +402,10 @@ const cancelSubscription = asyncHandler(async (req, res) => {
     success: true,
     data: {
       user: sanitizeUser(req.user),
+      subscription: req.user.subscription,
       usage: buildUsageSummary(req.user.subscription, usage),
-      message: 'Subscription changed to Free plan.'
+      message: 'Subscription changed to Free plan.',
+      billingConfig: buildSubscriptionBillingConfig()
     }
   });
 });
@@ -388,7 +421,7 @@ const devUpgradeSubscription = asyncHandler(async (req, res) => {
     });
   }
 
-  const requestedPlan = normalizePlan(req.body?.plan);
+  const requestedPlan = normalizePlan(req.body?.plan || 'pro');
   if (!['plus', 'pro'].includes(requestedPlan)) {
     return res.status(400).json({
       success: false,
@@ -420,8 +453,10 @@ const devUpgradeSubscription = asyncHandler(async (req, res) => {
     success: true,
     data: {
       user: sanitizeUser(req.user),
+      subscription: req.user.subscription,
       usage: buildUsageSummary(req.user.subscription, usage),
-      message: `Dev upgrade applied: ${requestedPlan.toUpperCase()}`
+      message: `Dev upgrade applied: ${requestedPlan.toUpperCase()}`,
+      billingConfig: buildSubscriptionBillingConfig()
     }
   });
 });

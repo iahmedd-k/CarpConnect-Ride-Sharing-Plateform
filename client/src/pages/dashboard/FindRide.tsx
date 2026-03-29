@@ -450,6 +450,7 @@ const FindRide = ({
     const [bookingLoading, setBookingLoading] = useState(false);
     const [nearbyLoading, setNearbyLoading] = useState(false);
     const [requestLoading, setRequestLoading] = useState(false);
+    const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
     const [myRequests, setMyRequests] = useState<any[]>([]);
     const [myRequestsLoading, setMyRequestsLoading] = useState(false);
     const [respondingCounterId, setRespondingCounterId] = useState<string | null>(null);
@@ -462,6 +463,7 @@ const FindRide = ({
 
     const resultsRef = useRef<HTMLDivElement>(null);
     const autoSearched = useRef(false);
+    const locationPrompted = useRef(false);
 
     const fetchOsmSuggestions = async (query: string): Promise<AddressSuggestion[]> => {
         const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=6&q=${encodeURIComponent(query)}`;
@@ -693,6 +695,61 @@ const FindRide = ({
 
         return { resolvedOrigin, resolvedDestination };
     };
+
+    const requestBrowserLocation = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+        if (!navigator.geolocation) {
+            if (!silent) toast.error("Geolocation is not supported on this device.");
+            return null;
+        }
+
+        return new Promise<{ lat: number; lng: number } | null>((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const coords = {
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude,
+                    };
+                    setCurrentCoords(coords);
+                    resolve(coords);
+                },
+                (error) => {
+                    if (!silent) {
+                        if (error.code === error.PERMISSION_DENIED) {
+                            toast.error("Location access is blocked. Allow location in your browser and try again.");
+                        } else if (error.code === error.TIMEOUT) {
+                            toast.error("Location request timed out. Please try again.");
+                        } else {
+                            toast.error("Unable to detect your location right now.");
+                        }
+                    }
+                    resolve(null);
+                },
+                { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+            );
+        });
+    }, []);
+
+    useEffect(() => {
+        if (locationPrompted.current || !navigator.geolocation) return;
+
+        const requestIfNeeded = async () => {
+            locationPrompted.current = true;
+
+            try {
+                const permissionsApi = (navigator as any).permissions;
+                if (permissionsApi?.query) {
+                    const status = await permissionsApi.query({ name: "geolocation" });
+                    if (status?.state === "denied") return;
+                }
+            } catch {
+                // Ignore permission query issues and fall back to direct browser request.
+            }
+
+            await requestBrowserLocation({ silent: true });
+        };
+
+        requestIfNeeded();
+    }, [requestBrowserLocation]);
 
     const fetchMyRequests = async () => {
         setMyRequestsLoading(true);
@@ -945,43 +1002,32 @@ const FindRide = ({
     };
 
     const handleNearbyRides = () => {
-        if (!navigator.geolocation) {
-            toast.error("Geolocation is not supported on this device.");
-            return;
-        }
-
         setNearbyLoading(true);
-        navigator.geolocation.getCurrentPosition(
-            async (pos) => {
-                try {
-                    setHasSearched(true);
-                    setSelected(null);
+        (async () => {
+            try {
+                setHasSearched(true);
+                setSelected(null);
 
-                    const lat = pos.coords.latitude;
-                    const lng = pos.coords.longitude;
-                    const res = await api.get(`/rides/offers?lat=${lat}&lng=${lng}&maxDistance=12000`);
-                    const found = normalizeRides(res.data);
+                const coords = currentCoords || await requestBrowserLocation();
+                if (!coords) return;
 
-                    setRides(found);
-                    if (found.length > 0) {
-                        setSelected(found[0]);
-                        toast.success(`Found ${found.length} nearby ride${found.length > 1 ? "s" : ""}.`);
-                        setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 250);
-                    } else {
-                        toast.info("No nearby rides found right now.");
-                    }
-                } catch (err: any) {
-                    toast.error(err?.response?.data?.message || "Failed to load nearby rides.");
-                } finally {
-                    setNearbyLoading(false);
+                const res = await api.get(`/rides/offers?lat=${coords.lat}&lng=${coords.lng}&maxDistance=12000`);
+                const found = normalizeRides(res.data);
+
+                setRides(found);
+                if (found.length > 0) {
+                    setSelected(found[0]);
+                    toast.success(`Found ${found.length} nearby ride${found.length > 1 ? "s" : ""}.`);
+                    setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 250);
+                } else {
+                    toast.info("No nearby rides found right now.");
                 }
-            },
-            () => {
+            } catch (err: any) {
+                toast.error(err?.response?.data?.message || "Failed to load nearby rides.");
+            } finally {
                 setNearbyLoading(false);
-                toast.error("Location permission denied. Enable it to find nearby rides.");
-            },
-            { enableHighAccuracy: true, timeout: 10000 }
-        );
+            }
+        })();
     };
 
     const handleCreateRequest = async () => {
@@ -1047,29 +1093,19 @@ const FindRide = ({
 
     // ─────────────────────── Render ──────────────────────────────────────────
     return (
-        <div className="space-y-6 pb-24">
-            <div className="bg-card rounded-3xl border border-border/50 p-5 md:p-6">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div>
-                        <h1 className="text-2xl font-display font-bold text-foreground">Find a Ride</h1>
-                        <p className="text-sm text-muted-foreground mt-1">
-                            Search active offers, or create a rider request if no direct ride fits your route.
-                        </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                        <span className="rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs font-semibold text-foreground">
+        <div className="h-full space-y-3 overflow-hidden">
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/50 bg-card px-5 py-4">
+                <h1 className="text-xl font-semibold text-foreground">Find a Ride</h1>
+                <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full border border-border bg-muted/20 px-3 py-1 text-xs font-semibold text-foreground">
                             {requestSummary.open} open requests
                         </span>
-                        <span className="rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs font-semibold text-foreground">
+                        <span className="rounded-full border border-border bg-muted/20 px-3 py-1 text-xs font-semibold text-foreground">
                             {requestSummary.counters} counter offers
                         </span>
-                        <span className="rounded-full border border-border bg-muted/20 px-3 py-1.5 text-xs font-semibold text-foreground">
+                        <span className="rounded-full border border-border bg-muted/20 px-3 py-1 text-xs font-semibold text-foreground">
                             {requestSummary.recurring} recurring
                         </span>
-                    </div>
-                </div>
-                <div className="mt-4 rounded-2xl border border-border/40 bg-muted/10 px-4 py-3 text-sm text-muted-foreground">
-                    Book direct rides here. Once a ride is confirmed, continue the trip in `My Rides`.
                 </div>
             </div>
             {/* ── Seat Modal ──────────────────────────────────────────────── */}
@@ -1109,13 +1145,11 @@ const FindRide = ({
             </AnimatePresence>
 
             {/* ── Search form ─────────────────────────────────────────────── */}
-            <div className="bg-card rounded-3xl p-6 md:p-8 border border-border/50 shadow-sm">
-                <div className="flex items-center justify-between mb-6 gap-3">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.65fr)_360px] lg:items-start">
+            <div className="bg-card rounded-2xl p-5 border border-border/50 shadow-sm">
+                <div className="mb-5 flex items-center justify-between gap-3">
                     <div>
-                        <h2 className="text-xl sm:text-2xl font-display font-bold">Find your ride</h2>
-                        <p className="text-sm text-muted-foreground mt-0.5">
-                            Search live and scheduled rides across the network
-                        </p>
+                        <h2 className="text-lg font-semibold">Find your ride</h2>
                     </div>
                     <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center">
                         <Search className="w-5 h-5 text-primary" />
@@ -1125,7 +1159,7 @@ const FindRide = ({
                 <form
                     id="find-ride-form"
                     onSubmit={e => { e.preventDefault(); executeSearch(); }}
-                    className="grid md:grid-cols-2 lg:grid-cols-4 gap-3"
+                    className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
                 >
                     {/* Origin */}
                     <AddressInput
@@ -1171,7 +1205,7 @@ const FindRide = ({
                             value={date}
                             onChange={e => setDate(e.target.value)}
                             min={new Date().toISOString().split("T")[0]}
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3.5 text-sm
+                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm
                                        focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all
                                        text-foreground"
                         />
@@ -1182,7 +1216,7 @@ const FindRide = ({
                         id="find-ride-submit"
                         type="submit"
                         disabled={searching}
-                        className="bg-gradient-primary text-white h-auto py-3.5 rounded-xl font-bold shadow-glow hover:opacity-90 transition-opacity"
+                        className="bg-gradient-primary text-white h-11 rounded-xl font-semibold shadow-glow hover:opacity-90 transition-opacity"
                     >
                         {searching
                             ? <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Searching…</span>
@@ -1208,7 +1242,7 @@ const FindRide = ({
                                     setRequestSeats(nextValue);
                                 }
                             }}
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                         />
                     </div>
                     <div>
@@ -1221,7 +1255,7 @@ const FindRide = ({
                             value={maxFarePerSeat}
                             onChange={(e) => setMaxFarePerSeat(e.target.value)}
                             placeholder="Leave blank for no limit"
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                         />
                     </div>
                 </div>
@@ -1235,7 +1269,7 @@ const FindRide = ({
                             type="time"
                             value={earliestTime}
                             onChange={(e) => setEarliestTime(e.target.value)}
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                         />
                     </div>
                     <div>
@@ -1246,16 +1280,16 @@ const FindRide = ({
                             type="time"
                             value={latestTime}
                             onChange={(e) => setLatestTime(e.target.value)}
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                         />
                     </div>
                 </div>
 
-                <div className="mt-3 rounded-2xl border border-border/50 bg-muted/20 p-4">
+                <div className="mt-3 rounded-2xl border border-border/50 bg-muted/20 p-3">
                     <label className="flex items-center justify-between gap-3 cursor-pointer">
                         <div>
                             <div className="text-sm font-semibold">Recurring commute</div>
-                            <div className="text-xs text-muted-foreground">Auto-create tomorrow's request when this one is active.</div>
+                            <div className="text-xs text-muted-foreground">Auto-create tomorrow's request.</div>
                         </div>
                         <input
                             type="checkbox"
@@ -1272,7 +1306,7 @@ const FindRide = ({
                             <select
                                 value={requestRecurrencePattern}
                                 onChange={(e) => setRequestRecurrencePattern(e.target.value)}
-                                className="w-full bg-muted/30 border border-border rounded-xl px-4 py-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                                className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
                             >
                                 <option value="weekdays">Monday-Friday</option>
                                 <option value="daily">Every day</option>
@@ -1312,9 +1346,9 @@ const FindRide = ({
                 </div>
             </div>
 
-            <div className="bg-card rounded-3xl p-5 border border-border/50">
+            <div className="bg-card rounded-2xl p-4 border border-border/50">
                 <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-base font-display font-bold">My Ride Requests</h3>
+                    <h3 className="text-base font-semibold">My Ride Requests</h3>
                     <div className="flex gap-2 flex-wrap justify-end">
                         <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => navigate("/dashboard?tab=rides")}>My Rides</Button>
                         <Button variant="outline" size="sm" className="h-8 text-xs" onClick={fetchMyRequests}>Refresh</Button>
@@ -1326,8 +1360,8 @@ const FindRide = ({
                 ) : myRequests.length === 0 ? (
                     <div className="text-sm text-muted-foreground py-3">No pending or matched requests.</div>
                 ) : (
-                    <div className="space-y-3">
-                        {myRequests.slice(0, 6).map((req) => (
+                    <div className="space-y-2">
+                        {myRequests.slice(0, 3).map((req) => (
                             <div key={req._id} className="rounded-xl border border-border/50 p-3 bg-muted/10 flex flex-col gap-2">
                                 <div className="flex items-center justify-between">
                                     <div>
@@ -1396,6 +1430,7 @@ const FindRide = ({
                         ))}
                     </div>
                 )}
+            </div>
             </div>
 
             {/* ── Edit Request Modal ───────────────────────────────────────── */}
@@ -1628,10 +1663,10 @@ const FindRide = ({
             </AnimatePresence>
 
             {/* Results + Map */}
-            {(hasSearched || searching) && <div className="grid lg:grid-cols-2 gap-6" ref={resultsRef}>
+            {(hasSearched || searching) && <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]" ref={resultsRef}>
 
                 {/* ─── Results column ─── */}
-                <div className="space-y-4">
+                <div className="space-y-3">
                     {/* Header row */}
                     <div className="flex items-center justify-between px-1">
                         <div>
@@ -1683,8 +1718,8 @@ const FindRide = ({
 
                     {/* Ride cards */}
                     {!searching && rides.length > 0 && (
-                        <div className="space-y-3 max-h-[660px] overflow-y-auto pr-1 custom-scrollbar">
-                            {rides.map((ride, i) => {
+                        <div className="grid gap-3 xl:grid-cols-2">
+                            {rides.slice(0, 4).map((ride, i) => {
                                 const btn = bookBtnState(ride);
                                 const isSelected = selected?._id === ride._id;
                                 const isBookingThis = bookingLoading && bookingId === ride._id;
@@ -1707,7 +1742,7 @@ const FindRide = ({
                                         transition={{ delay: i * 0.06 }}
                                         onClick={() => setSelected(ride)}
                                         id={`ride-card-${i}`}
-                                        className={`p-4 rounded-3xl border cursor-pointer transition-all ${isSelected
+                                        className={`p-4 rounded-2xl border cursor-pointer transition-all ${isSelected
                                             ? "bg-primary/5 border-primary shadow-md shadow-primary/10"
                                             : "bg-card border-border/40 hover:border-primary/30"}
                                         `}
@@ -1839,14 +1874,14 @@ const FindRide = ({
                 </div>
 
                 {/* ─── Map / Detail column ─── */}
-                <div className="lg:sticky lg:top-20">
+                <div>
                     <AnimatePresence mode="wait">
                         {selected ? (
                             <motion.div
                                 key={selected._id}
                                 initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.18 }}
-                                className="bg-card rounded-3xl border border-border/50 overflow-hidden"
+                                className="bg-card rounded-2xl border border-border/50 overflow-hidden"
                             >
                                 {/* Map */}
                                 <div className="h-72 relative overflow-hidden">

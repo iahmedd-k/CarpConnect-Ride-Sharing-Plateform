@@ -284,17 +284,15 @@ const RideHistory = () => {
 
     if (!canUseHistory) {
         return (
-            <div className="space-y-6 pb-10">
-                <div className="bg-card rounded-3xl border border-amber-300/60 p-6">
+            <div className="space-y-4">
+                <div className="bg-card rounded-2xl border border-amber-300/60 p-5">
                     <div className="flex items-start justify-between gap-4 flex-wrap">
                         <div>
-                            <h2 className="text-2xl font-display font-bold text-foreground flex items-center gap-2">
+                            <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
                                 <Lock className="w-5 h-5 text-amber-500" />
                                 Ride History (Locked)
                             </h2>
-                            <p className="text-sm text-muted-foreground mt-1">
-                                Booking history and detailed ride tracking are available on Plus and Pro.
-                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">Available on Plus and Pro.</p>
                         </div>
                         <button
                             onClick={() => { window.location.href = "/driver-dashboard?tab=subscription"; }}
@@ -303,32 +301,18 @@ const RideHistory = () => {
                             Upgrade Plan
                         </button>
                     </div>
-                    <div className="mt-5 grid md:grid-cols-3 gap-3 text-xs">
-                        <div className="rounded-2xl border border-border/50 bg-muted/20 p-4">
-                            <p className="font-bold uppercase tracking-wider text-muted-foreground mb-1">Includes on Plus</p>
-                            <p className="text-foreground">Ride-by-ride history, search, filters, and status timelines.</p>
-                        </div>
-                        <div className="rounded-2xl border border-border/50 bg-muted/20 p-4">
-                            <p className="font-bold uppercase tracking-wider text-muted-foreground mb-1">Includes on Pro</p>
-                            <p className="text-foreground">History plus priority placement and deeper analytics views.</p>
-                        </div>
-                        <div className="rounded-2xl border border-border/50 bg-muted/20 p-4">
-                            <p className="font-bold uppercase tracking-wider text-muted-foreground mb-1">Current plan</p>
-                            <p className="text-foreground">{String(currentPlan).toUpperCase()}</p>
-                        </div>
-                    </div>
+                    <div className="mt-4 text-xs font-medium text-muted-foreground">Current plan: {String(currentPlan).toUpperCase()}</div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="space-y-6 pb-10">
+        <div className="space-y-4">
             {/* Header */}
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h2 className="text-2xl font-display font-bold">Ride History</h2>
-                    <p className="text-sm text-muted-foreground mt-0.5">Your full journey record as a driver</p>
+                    <h2 className="text-xl font-semibold">Ride History</h2>
                 </div>
                 <div className="flex gap-3">
                     <button onClick={clearHistory} className="flex items-center gap-2 text-sm text-red-400 hover:opacity-80 font-semibold transition-colors">
@@ -390,7 +374,7 @@ const RideHistory = () => {
             {paged.length === 0 ? (
                 <motion.div
                     initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-                    className="text-center py-20 bg-card rounded-3xl border-2 border-dashed border-border/40"
+                    className="text-center py-16 bg-card rounded-2xl border-2 border-dashed border-border/40"
                 >
                     <AlertCircle className="w-14 h-14 mx-auto mb-4 opacity-15" />
                     <h3 className="font-bold text-lg mb-1">No past trips</h3>
@@ -399,7 +383,7 @@ const RideHistory = () => {
                     </p>
                 </motion.div>
             ) : (
-                <div className="bg-card rounded-3xl border border-border/50 overflow-hidden shadow-sm">
+                <div className="bg-card rounded-2xl border border-border/50 overflow-hidden shadow-sm">
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>

@@ -734,52 +734,30 @@ const MyRides = () => {
   }
 
   return (
-    <div className="space-y-6 pb-10">
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="bg-card rounded-2xl border border-border/50 p-4">
+    <div className="space-y-3 pb-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="rounded-2xl border border-border/50 bg-card p-4">
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Active Rides</p>
-          <p className="text-2xl font-display font-black text-foreground">{activeRideCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">Confirmed, picked up, or live</p>
+          <p className="text-2xl font-semibold text-foreground">{activeRideCount}</p>
         </div>
-        <div className="bg-card rounded-2xl border border-border/50 p-4">
+        <div className="rounded-2xl border border-border/50 bg-card p-4">
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Pending</p>
-          <p className="text-2xl font-display font-black text-foreground">{pendingCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">Waiting for driver response</p>
+          <p className="text-2xl font-semibold text-foreground">{pendingCount}</p>
         </div>
-        <div className="bg-card rounded-2xl border border-border/50 p-4">
+        <div className="rounded-2xl border border-border/50 bg-card p-4">
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Completed</p>
-          <p className="text-2xl font-display font-black text-foreground">{completedCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">Ready for rating and history</p>
+          <p className="text-2xl font-semibold text-foreground">{completedCount}</p>
         </div>
-        <div className="bg-card rounded-2xl border border-border/50 p-4">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Cancelled / Declined</p>
-          <p className="text-2xl font-display font-black text-foreground">{cancelledCount}</p>
-          <p className="text-xs text-muted-foreground mt-1">Can be rebooked when available</p>
-        </div>
-      </div>
-
-      <div className="bg-card rounded-3xl border border-border/50 p-5">
-        <h3 className="font-bold text-lg">How Rider Ride Flow Works</h3>
-        <div className="grid md:grid-cols-3 gap-4 mt-4 text-sm text-muted-foreground">
-          <div className="rounded-2xl bg-muted/20 border border-border/40 p-4">
-            <p className="font-semibold text-foreground">1. Booking Status</p>
-            <p className="mt-1">Pending, confirmed, pickup, live, and completed bookings all stay on this page.</p>
-          </div>
-          <div className="rounded-2xl bg-muted/20 border border-border/40 p-4">
-            <p className="font-semibold text-foreground">2. Track and Chat</p>
-            <p className="mt-1">Use Track for live ride status and Message Driver for trip-specific chat.</p>
-          </div>
-          <div className="rounded-2xl bg-muted/20 border border-border/40 p-4">
-            <p className="font-semibold text-foreground">3. After the Ride</p>
-            <p className="mt-1">Completed rides can be reviewed here, and cancelled rides can be rebooked.</p>
-          </div>
+        <div className="rounded-2xl border border-border/50 bg-card p-4">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Cancelled</p>
+          <p className="text-2xl font-semibold text-foreground">{cancelledCount}</p>
         </div>
       </div>
 
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-2xl font-bold">My Rides</h2>
+          <h2 className="text-xl font-semibold">My Rides</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             {bookings.length} booking{bookings.length !== 1 ? "s" : ""} total
             {activeRequests.length > 0 ? ` • ${activeRequests.length} active request${activeRequests.length !== 1 ? "s" : ""}` : ""}
@@ -799,13 +777,10 @@ const MyRides = () => {
       </div>
 
       {activeRequests.length > 0 && (
-        <div className="bg-card rounded-3xl border border-border/50 p-5">
+        <div className="bg-card rounded-2xl border border-border/50 p-4">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <div>
-              <h3 className="font-bold text-lg">Active Ride Requests</h3>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Matched or open requests stay visible here even if booking history is cleared.
-              </p>
+              <h3 className="text-base font-semibold">Active Ride Requests</h3>
             </div>
             <Button variant="outline" size="sm" onClick={() => navigate("/dashboard?tab=find")} className="rounded-xl gap-2 h-10">
               <Search className="w-4 h-4" /> Manage Requests

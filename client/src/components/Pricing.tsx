@@ -4,6 +4,28 @@ import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { PLAN_META } from "@/lib/plans";
 
+const getPlanHref = (planName: string) => {
+  if (typeof window === "undefined") return "/signup";
+
+  const token = localStorage.getItem("carpconnect_token");
+  const rawUser = localStorage.getItem("carpconnect_user");
+
+  if (!token || !rawUser) return "/signup";
+
+  try {
+    const user = JSON.parse(rawUser);
+    const dashboardBase = user?.role === "driver" ? "/driver-dashboard" : "/dashboard";
+
+    if (planName === PLAN_META.free.name) {
+      return dashboardBase;
+    }
+
+    return `${dashboardBase}?tab=subscription`;
+  } catch {
+    return "/signup";
+  }
+};
+
 const plans = [
   {
     name: PLAN_META.free.name,
@@ -17,7 +39,7 @@ const plans = [
       ...PLAN_META.free.highlights,
     ],
     cta: "Get Started",
-    href: "/signup",
+    href: getPlanHref(PLAN_META.free.name),
     accent: false,
   },
   {
@@ -32,7 +54,7 @@ const plans = [
       ...PLAN_META.plus.highlights,
     ],
     cta: "Upgrade to Plus",
-    href: "/signup",
+    href: getPlanHref(PLAN_META.plus.name),
     accent: true,
     badge: "Most Popular",
   },
@@ -48,7 +70,7 @@ const plans = [
       ...PLAN_META.pro.highlights,
     ],
     cta: "Upgrade to Pro",
-    href: "/signup",
+    href: getPlanHref(PLAN_META.pro.name),
     accent: false,
   },
 ];

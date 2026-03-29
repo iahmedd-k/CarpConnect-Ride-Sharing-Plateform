@@ -92,10 +92,10 @@ const DriverEarnings = () => {
     };
 
     return (
-        <div className="space-y-6 max-w-5xl mx-auto">
+        <div className="space-y-4 max-w-5xl mx-auto">
             {/* Header & Filter */}
             <div className="flex items-center justify-between flex-wrap gap-4">
-                <h2 className="text-2xl font-display font-bold text-foreground">Earnings</h2>
+                <h2 className="text-xl font-semibold text-foreground">Earnings</h2>
                 <div className="flex items-center gap-3 flex-wrap">
                     <div className="flex gap-1 p-1 bg-muted/20 rounded-xl border border-border/50">
                         {(["all", "today", "week", "month"] as const).map((tf) => (
@@ -118,11 +118,11 @@ const DriverEarnings = () => {
             </div>
 
             {/* Top Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-3xl p-6 text-white shadow-lg relative overflow-hidden"
+                    className="bg-gradient-to-br from-emerald-600 to-emerald-800 rounded-2xl p-5 text-white shadow-lg relative overflow-hidden"
                 >
                     <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10" />
                     <div className="flex justify-between items-start mb-6 relative z-10">
@@ -132,7 +132,7 @@ const DriverEarnings = () => {
                         <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-md">Net Balance</span>
                     </div>
                     <div className="relative z-10">
-                        <div className="text-4xl font-display font-black mb-1">PKR {data.totalBalance.toLocaleString()}</div>
+                        <div className="text-3xl font-display font-black mb-1">PKR {data.totalBalance.toLocaleString()}</div>
                         <div className="text-emerald-100 text-xs font-medium">Platform Fee (10%): PKR {(data.platformFees || 0).toLocaleString()}</div>
                     </div>
 
@@ -142,7 +142,7 @@ const DriverEarnings = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="bg-card border border-border/50 rounded-3xl p-6 shadow-sm flex flex-col justify-between"
+                    className="bg-card border border-border/50 rounded-2xl p-5 shadow-sm flex flex-col justify-between"
                 >
                     <div className="flex justify-between items-start mb-4">
                         <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
@@ -153,7 +153,7 @@ const DriverEarnings = () => {
                         </span>
                     </div>
                     <div>
-                        <div className="text-3xl font-display font-black text-foreground mb-1">{data.totalRides}</div>
+                        <div className="text-2xl font-display font-black text-foreground mb-1">{data.totalRides}</div>
                         <div className="flex items-center gap-2 text-sm">
                             <span className="text-muted-foreground">Completed Rides</span>
                         </div>
@@ -164,7 +164,7 @@ const DriverEarnings = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="bg-card border border-border/50 rounded-3xl p-6 shadow-sm flex flex-col justify-between"
+                    className="bg-card border border-border/50 rounded-2xl p-5 shadow-sm flex flex-col justify-between"
                 >
                     <div className="flex justify-between items-start mb-4">
                         <div className="w-10 h-10 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500">
@@ -185,12 +185,11 @@ const DriverEarnings = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.22 }}
-                className="bg-card border border-border/50 rounded-3xl p-6 shadow-sm"
+                className="bg-card border border-border/50 rounded-2xl p-5 shadow-sm"
             >
                 <div className="flex items-center justify-between gap-4 mb-4">
                     <div>
-                        <h3 className="font-display font-bold text-xl">Subscription Usage Limits</h3>
-                        <p className="text-xs text-muted-foreground">Monthly platform usage by your active plan</p>
+                        <h3 className="font-display font-bold text-lg">Subscription Usage Limits</h3>
                     </div>
                     <span className="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-primary/10 text-primary">
                         {usage?.monthKey || "Current Month"}
@@ -222,11 +221,10 @@ const DriverEarnings = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="bg-card border border-border/50 rounded-3xl overflow-hidden shadow-sm flex flex-col"
+                className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-sm flex flex-col"
             >
-                <div className="p-6 border-b border-border/50">
-                    <h3 className="font-display font-bold text-xl">Recent Earnings</h3>
-                    <p className="text-xs text-muted-foreground">History of completed rides and fares.</p>
+                <div className="p-5 border-b border-border/50">
+                    <h3 className="font-display font-bold text-lg">Recent Earnings</h3>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -266,8 +264,8 @@ const DriverEarnings = () => {
                 </div>
             </motion.div>
             ) : (
-            <div className="bg-card border border-amber-300/60 rounded-3xl p-6 shadow-sm">
-                <h3 className="font-display font-bold text-xl flex items-center gap-2">
+            <div className="bg-card border border-amber-300/60 rounded-2xl p-5 shadow-sm">
+                <h3 className="font-display font-bold text-lg flex items-center gap-2">
                     <Lock className="w-4 h-4 text-amber-500" />
                     Detailed Earnings Ledger (Locked)
                 </h3>

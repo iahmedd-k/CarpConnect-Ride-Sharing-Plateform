@@ -99,7 +99,7 @@ const DriverProfile = ({ driverId, onBack }: DriverProfileProps) => {
     };
 
     return (
-        <div className="space-y-6 pb-10">
+        <div className="space-y-4">
             {/* Back button */}
             <button onClick={onBack} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                 <ArrowLeft className="w-4 h-4" /> Back to search
@@ -109,18 +109,18 @@ const DriverProfile = ({ driverId, onBack }: DriverProfileProps) => {
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-card rounded-3xl p-8 border border-border/50 relative overflow-hidden"
+                className="bg-card rounded-2xl p-6 border border-border/50 relative overflow-hidden"
             >
                 <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -mr-32 -mt-32 blur-3xl" />
-                <div className="flex flex-col md:flex-row gap-8 items-start relative z-10">
-                    <div className="w-24 h-24 rounded-3xl bg-gradient-primary flex items-center justify-center text-white text-3xl font-bold shadow-glow overflow-hidden">
+                <div className="flex flex-col md:flex-row gap-6 items-start relative z-10">
+                    <div className="w-20 h-20 rounded-2xl bg-gradient-primary flex items-center justify-center text-white text-2xl font-bold shadow-glow overflow-hidden">
                         {driver.profilePhoto || driver.avatar
                             ? <img src={driver.profilePhoto || driver.avatar} className="w-full h-full object-cover" alt="Driver" />
                             : driver.name?.[0]?.toUpperCase() || "D"
                         }
                     </div>
                     <div className="flex-1 space-y-2">
-                        <h2 className="text-3xl font-display font-bold text-foreground">{driver.name}</h2>
+                        <h2 className="text-2xl font-semibold text-foreground">{driver.name}</h2>
                         <div className="flex flex-wrap gap-2">
                             {driver.verified && (
                                 <span className="px-3 py-1 rounded-full bg-emerald/10 text-emerald text-xs font-bold uppercase tracking-wider flex items-center gap-1">
@@ -164,14 +164,14 @@ const DriverProfile = ({ driverId, onBack }: DriverProfileProps) => {
                         <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center mb-3">
                             <stat.icon className={`w-5 h-5 ${stat.color}`} />
                         </div>
-                        <div className={`text-2xl font-display font-bold ${stat.color} mb-0.5`}>{stat.value}</div>
+                        <div className={`text-xl font-semibold ${stat.color} mb-0.5`}>{stat.value}</div>
                         <div className="text-xs text-muted-foreground">{stat.label}</div>
                     </motion.div>
                 ))}
             </div>
 
             {/* Map + Reviews */}
-            <div className="grid lg:grid-cols-2 gap-6">
+            <div className="grid lg:grid-cols-2 gap-4">
                 {/* Map of recent routes */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -205,7 +205,7 @@ const DriverProfile = ({ driverId, onBack }: DriverProfileProps) => {
                             <span className="font-display font-bold text-lg">{driver.ratings?.average?.toFixed(1) || 0}</span>
                         </div>
                     </div>
-                    <div className="p-4 space-y-4 max-h-[300px] overflow-y-auto custom-scrollbar">
+                    <div className="p-4 space-y-3">
                         {reviews.length > 0 ? reviews.map((review) => (
                             <div key={review._id} className="flex gap-4 p-3 rounded-xl bg-muted/20 border border-border/50">
                                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold shrink-0">
@@ -237,7 +237,7 @@ const DriverProfile = ({ driverId, onBack }: DriverProfileProps) => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.5 }}
-                    className="bg-card rounded-2xl p-6 border border-border/50"
+                    className="bg-card rounded-2xl p-5 border border-border/50"
                 >
                     <h3 className="font-display font-bold text-lg mb-4 flex items-center gap-2">
                         <Car className="w-5 h-5 text-primary" /> Vehicle Details

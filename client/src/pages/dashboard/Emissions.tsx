@@ -82,7 +82,9 @@ const Emissions = () => {
     const totalCo2Filtered = normalizedReports.reduce((sum, report) => sum + report.savedKg, 0);
     const totalFuelFiltered = normalizedReports.reduce((sum, report) => sum + (report.distanceKm * 0.08), 0);
     const avgSaved = normalizedReports.length > 0 ? totalCo2Filtered / normalizedReports.length : 0;
-    const totalSavedFromStats = Number(stats?.totalCo2SavedKg ?? totalCo2Filtered) || 0;
+    const totalSavedFromStats = timeFilter === "all"
+        ? Number(stats?.totalCo2SavedKg ?? totalCo2Filtered) || 0
+        : totalCo2Filtered;
 
     const monthlyData = Array.isArray(stats?.monthlyTrend) && stats.monthlyTrend.length > 0
         ? stats.monthlyTrend
@@ -106,11 +108,10 @@ const Emissions = () => {
     ];
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
-                    <h2 className="text-2xl font-display font-bold text-foreground">Emissions Tracker</h2>
-                    <p className="text-sm text-muted-foreground mt-1">Completed-ride carbon savings and eco impact</p>
+                    <h2 className="text-xl font-semibold text-foreground">Emissions Tracker</h2>
                 </div>
                 <div className="flex gap-1 p-1 bg-muted/20 rounded-xl border border-border/50">
                     {(["all", "today", "week", "month"] as const).map((tf) => (
@@ -128,19 +129,19 @@ const Emissions = () => {
                 </div>
             </div>
 
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 {cards.map((stat, i) => (
                     <motion.div
                         key={stat.label}
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: i * 0.1 }}
-                        className="bg-card rounded-2xl p-5 border border-border/50"
+                        className="bg-card rounded-2xl p-4 border border-border/50"
                     >
                         <div className={`w-10 h-10 rounded-xl ${stat.bg} flex items-center justify-center mb-3`}>
                             <stat.icon className={`w-5 h-5 ${stat.color}`} />
                         </div>
-                        <div className={`text-2xl font-display font-bold ${stat.color} mb-0.5`}>{stat.value}</div>
+                        <div className={`text-xl font-semibold ${stat.color} mb-0.5`}>{stat.value}</div>
                         <div className="text-xs text-muted-foreground mb-1">{stat.label}</div>
                         <div className="flex items-center gap-1 text-[10px] text-emerald font-medium">
                             <Zap className="w-3 h-3" />{stat.change}
@@ -150,12 +151,12 @@ const Emissions = () => {
             </div>
 
             {canUseDetailed ? (
-            <div className="grid lg:grid-cols-3 gap-6">
+            <div className="grid lg:grid-cols-3 gap-4">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="lg:col-span-2 bg-card rounded-2xl p-6 border border-border/50"
+                    className="lg:col-span-2 bg-card rounded-2xl p-5 border border-border/50"
                 >
                     <h3 className="font-display font-bold text-foreground mb-1">Monthly CO2 Savings</h3>
                     <p className="text-xs text-muted-foreground mb-5">Real completed-ride savings by month</p>
@@ -180,7 +181,7 @@ const Emissions = () => {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
-                    className="bg-card rounded-2xl p-6 border border-border/50"
+                    className="bg-card rounded-2xl p-5 border border-border/50"
                 >
                     <h3 className="font-display font-bold text-foreground mb-1">Savings Breakdown</h3>
                     <p className="text-xs text-muted-foreground mb-4">Estimated split of savings sources</p>
@@ -205,7 +206,7 @@ const Emissions = () => {
                 </motion.div>
             </div>
             ) : (
-            <div className="rounded-2xl border border-amber-300/60 bg-card p-6">
+            <div className="rounded-2xl border border-amber-300/60 bg-card p-4">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                     <div>
                         <h3 className="font-display font-bold text-foreground flex items-center gap-2">
@@ -230,10 +231,9 @@ const Emissions = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.35 }}
-                className="bg-card rounded-2xl p-6 border border-border/50"
+                className="bg-card rounded-2xl p-5 border border-border/50"
             >
-                <h3 className="font-display font-bold text-foreground mb-1">How It Is Calculated</h3>
-                <p className="text-xs text-muted-foreground mb-4">Current methodology for completed rides</p>
+                <h3 className="font-display font-bold text-foreground mb-3">How It Is Calculated</h3>
                 <div className="grid md:grid-cols-2 gap-4 text-sm">
                     <div className="rounded-2xl bg-muted/20 border border-border/50 p-4">
                         <p className="font-semibold text-foreground mb-2">Formula</p>
@@ -250,9 +250,9 @@ const Emissions = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.45 }}
-                className="bg-card rounded-2xl p-6 border border-border/50"
+                className="bg-card rounded-2xl p-5 border border-border/50"
             >
-                <h3 className="font-display font-bold text-foreground mb-4 text-lg">Recent Eco Reports</h3>
+                <h3 className="font-display font-bold text-foreground mb-3">Recent Eco Reports</h3>
                 <div className="space-y-4">
                     {normalizedReports.length > 0 ? normalizedReports.map((report) => (
                         <div key={report._id} className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/50">
@@ -282,7 +282,7 @@ const Emissions = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5 }}
-                className="bg-card rounded-2xl p-6 border border-border/50"
+                className="bg-card rounded-2xl p-5 border border-border/50"
             >
                 <h3 className="font-display font-bold text-foreground mb-4">Eco Milestones</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

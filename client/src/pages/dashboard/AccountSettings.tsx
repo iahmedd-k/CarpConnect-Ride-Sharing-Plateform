@@ -107,13 +107,13 @@ const AccountSettings = () => {
     }
 
     return (
-        <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 pb-20">
+        <div className="max-w-4xl mx-auto space-y-4">
             {/* Header */}
-            <div className="bg-card rounded-3xl p-5 sm:p-8 border border-border/50 relative overflow-hidden">
+            <div className="bg-card rounded-2xl p-5 sm:p-6 border border-border/50 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -mr-32 -mt-32 blur-3xl" />
-                <div className="flex flex-col md:flex-row gap-8 items-start relative z-10">
+                <div className="flex flex-col md:flex-row gap-6 items-start relative z-10">
                     <div className="relative group">
-                        <div className="w-32 h-32 rounded-3xl bg-gradient-primary flex items-center justify-center text-white text-4xl font-bold shadow-glow overflow-hidden">
+                        <div className="w-24 h-24 rounded-2xl bg-gradient-primary flex items-center justify-center text-white text-3xl font-bold shadow-glow overflow-hidden">
                             {user?.avatar ? <img src={user.avatar} className="w-full h-full object-cover" /> : user?.name?.[0]?.toUpperCase() || "C"}
                         </div>
                         <button className="absolute -bottom-2 -right-2 w-10 h-10 rounded-xl bg-card border border-border shadow-lg flex items-center justify-center text-primary hover:text-primary/80 transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100">
@@ -121,7 +121,7 @@ const AccountSettings = () => {
                         </button>
                     </div>
                     <div className="flex-1 space-y-1">
-                        <h2 className="text-2xl sm:text-3xl font-display font-bold text-foreground break-words">{user?.name}</h2>
+                        <h2 className="text-2xl font-semibold text-foreground break-words">{user?.name}</h2>
                         <p className="text-muted-foreground">{user?.email}</p>
                         <div className="flex gap-2 mt-4 flex-wrap">
                             <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold uppercase tracking-wider">{user?.role}</span>
@@ -131,14 +131,14 @@ const AccountSettings = () => {
                 </div>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-5 sm:gap-8">
+            <div className="grid md:grid-cols-2 gap-4 sm:gap-5">
                 {/* Profile Form */}
-                <form onSubmit={handleSaveProfile} className="space-y-8">
+                <form onSubmit={handleSaveProfile} className="space-y-4">
                     {/* Personal Information */}
-                    <div className="bg-card rounded-3xl p-5 sm:p-8 border border-border/50 space-y-6">
+                    <div className="bg-card rounded-2xl p-5 sm:p-6 border border-border/50 space-y-5">
                         <div className="flex items-center gap-3 mb-2">
                             <User className="w-5 h-5 text-primary" />
-                            <h3 className="text-xl font-display font-bold">Personal Info</h3>
+                            <h3 className="text-lg font-semibold">Personal Info</h3>
                         </div>
                         <div className="space-y-4">
                             <div className="space-y-2">
@@ -159,10 +159,10 @@ const AccountSettings = () => {
                     </div>
 
                     {/* Ride Preferences */}
-                    <div className="bg-card rounded-3xl p-5 sm:p-8 border border-border/50 space-y-6">
+                    <div className="bg-card rounded-2xl p-5 sm:p-6 border border-border/50 space-y-5">
                         <div className="flex items-center gap-3 mb-2">
                             <Music className="w-5 h-5 text-primary" />
-                            <h3 className="text-xl font-display font-bold">Preferences</h3>
+                            <h3 className="text-lg font-semibold">Preferences</h3>
                         </div>
                         <div className="space-y-6">
                             <div className="space-y-2">
@@ -194,10 +194,10 @@ const AccountSettings = () => {
 
                     {/* Vehicle Details for Drivers */}
                     {(user?.role === 'driver' || user?.role === 'both') && (
-                        <div className="bg-card rounded-3xl p-5 sm:p-8 border border-border/50 space-y-6">
+                        <div className="bg-card rounded-2xl p-5 sm:p-6 border border-border/50 space-y-5">
                             <div className="flex items-center gap-3 mb-2">
                                 <Car className="w-5 h-5 text-primary" />
-                                <h3 className="text-xl font-display font-bold">Vehicle Details</h3>
+                                <h3 className="text-lg font-semibold">Vehicle Details</h3>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="space-y-2"><label className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Make</label><input value={vehicle.make} onChange={(e) => setVehicle({ ...vehicle, make: e.target.value })} className="w-full h-12 bg-muted/30 border border-border rounded-xl px-4 text-sm focus:border-primary outline-none transition-all" /></div>
@@ -221,7 +221,7 @@ const AccountSettings = () => {
                     )}
 
                     <div className="flex flex-col gap-4">
-                        <Button type="submit" disabled={saving} className="bg-gradient-primary text-white h-14 rounded-2xl font-bold shadow-glow text-lg">
+                        <Button type="submit" disabled={saving} className="bg-gradient-primary text-white h-12 rounded-2xl font-semibold shadow-glow">
                             {saving ? <Loader2 className="w-6 h-6 animate-spin" /> : "Save Profile & Preferences"}
                         </Button>
                         {success && <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-emerald/10 border border-emerald/30 text-emerald p-4 rounded-2xl flex items-center gap-3 font-medium"><CheckCircle className="w-5 h-5" /> Profile updated successfully!</motion.div>}
@@ -229,12 +229,12 @@ const AccountSettings = () => {
                 </form>
 
                 {/* Security Form */}
-                <div className="space-y-8">
+                <div className="space-y-4">
                     {/* Security & Password */}
-                    <div className="bg-card rounded-3xl p-5 sm:p-8 border border-border/50 space-y-6">
+                    <div className="bg-card rounded-2xl p-5 sm:p-6 border border-border/50 space-y-5">
                         <div className="flex items-center gap-3 mb-2">
                             <Lock className="w-5 h-5 text-primary" />
-                            <h3 className="text-xl font-display font-bold">Security</h3>
+                            <h3 className="text-lg font-semibold">Security</h3>
                         </div>
 
                         {/* 2FA Toggle */}
@@ -275,10 +275,10 @@ const AccountSettings = () => {
                     </div>
 
                     {/* Notifications Panel */}
-                    <div className="bg-card rounded-3xl p-5 sm:p-8 border border-border/50 space-y-6">
+                    <div className="bg-card rounded-2xl p-5 sm:p-6 border border-border/50 space-y-5">
                         <div className="flex items-center gap-3 mb-2">
                             <Bell className="w-5 h-5 text-primary" />
-                            <h3 className="text-xl font-display font-bold">Notifications</h3>
+                            <h3 className="text-lg font-semibold">Notifications</h3>
                         </div>
                         <div className="space-y-4">
                             {[

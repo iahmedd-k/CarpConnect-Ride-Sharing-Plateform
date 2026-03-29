@@ -26,6 +26,7 @@ import RiderRatings from "./dashboard/RiderRatings";
 import SubscriptionPage from "./dashboard/SubscriptionPage";
 import NotificationsPanel from "@/components/NotificationsPanel";
 import { AnimatePresence } from "framer-motion";
+import RiderOverviewCompact from "./dashboard/RiderOverviewCompact";
 
 /* ──────────── fallback chart data (used when API returns empty) ──────────── */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -402,7 +403,7 @@ const Dashboard = () => {
                     const driverId = activeTab.split("profile:")[1];
                     return <DriverProfile driverId={driverId} onBack={() => handleTabChange("find")} />;
                 }
-                return <Overview user={user} onBookRide={() => handleTabChange("find")} />;
+                return <RiderOverviewCompact user={user} onBookRide={() => handleTabChange("find")} />;
         }
     };
 
@@ -417,56 +418,56 @@ const Dashboard = () => {
     return (
         <div className="min-h-screen bg-muted/10 overflow-x-hidden">
             {/* Sidebar */}
-            <aside className="fixed left-0 top-0 bottom-0 w-64 bg-[#0a0a0c] flex flex-col z-40 hidden lg:flex border-r border-white/5">
-                <div className="p-6 border-b border-white/5">
+            <aside className="fixed inset-y-0 left-0 z-40 hidden h-screen w-64 overflow-hidden border-r border-white/5 bg-[#0a0a0c] lg:flex lg:flex-col">
+                <div className="shrink-0 border-b border-white/5 px-5 py-5">
                     <Link to="/" className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-glow">
-                            <Car className="w-5 h-5 text-white" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-primary shadow-glow">
+                            <Car className="h-5 w-5 text-white" />
                         </div>
-                        <span className="font-display font-bold text-white text-xl tracking-tight">CarpConnect</span>
+                        <span className="text-lg font-bold tracking-tight text-white">CarpConnect</span>
                     </Link>
                 </div>
 
                 {/* User info */}
-                <div className="px-4 py-6 border-b border-white/5">
-                    <div className="flex items-center gap-3 bg-white/5 p-3 rounded-2xl border border-white/5">
-                        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white font-bold overflow-hidden shadow-inner uppercase">
+                <div className="shrink-0 border-b border-white/5 px-4 py-4">
+                    <div className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 p-3">
+                        <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-primary text-sm font-bold uppercase text-white shadow-inner">
                             {user?.avatar ? <img src={user.avatar} className="w-full h-full object-cover" /> : initials}
                         </div>
                         <div className="min-w-0">
-                            <div className="text-sm font-bold text-white truncate">{user?.name || "Rider"}</div>
-                            <div className="text-[10px] text-emerald font-bold tracking-widest uppercase opacity-80 flex items-center gap-1">
-                                <CheckCircle className="w-2 h-2" /> Platinum
+                            <div className="truncate text-sm font-semibold text-white">{user?.name || "Rider"}</div>
+                            <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-emerald/90">
+                                <CheckCircle className="h-3 w-3" /> Active
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
+                <nav className="custom-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-3">
                     {navItems.map((item) => (
                         <button
                             key={item.id}
                             onClick={() => handleTabChange(item.id)}
-                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all group ${activeTab === item.id
+                            className={`group flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${activeTab === item.id
                                 ? "bg-primary text-white shadow-glow-primary"
                                 : "text-muted-foreground hover:bg-white/5 hover:text-white"
                                 }`}
                         >
-                            <item.icon className={`w-4 h-4 shrink-0 transition-transform group-hover:scale-110 ${activeTab === item.id ? "text-white" : "text-muted-foreground/60"}`} />
+                            <item.icon className={`h-4 w-4 shrink-0 transition-transform group-hover:scale-110 ${activeTab === item.id ? "text-white" : "text-muted-foreground/60"}`} />
                             {item.label}
                         </button>
                     ))}
                 </nav>
 
-                <div className="p-4 border-t border-white/5 space-y-1">
+                <div className="shrink-0 space-y-1 border-t border-white/5 p-3">
                     <button
                         onClick={() => handleTabChange('settings')}
-                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-white/5 hover:text-white'}`}
+                        className={`flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-white/5 hover:text-white'}`}
                     >
-                        <Settings className="w-4 h-4" /> Settings
+                        <Settings className="h-4 w-4" /> Settings
                     </button>
-                    <button onClick={handleLogout} className="w-full text-left flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-400/70 hover:bg-red-500/10 hover:text-red-400 transition-all">
-                        <LogOut className="w-4 h-4" /> Log Out
+                    <button onClick={handleLogout} className="flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm font-medium text-red-400/70 transition-all hover:bg-red-500/10 hover:text-red-400">
+                        <LogOut className="h-4 w-4" /> Log Out
                     </button>
                 </div>
             </aside>
@@ -488,11 +489,11 @@ const Dashboard = () => {
             </div>
 
             {/* Main */}
-            <main className="lg:ml-64 min-h-screen pb-28 lg:pb-0">
+            <main className="min-h-screen pb-28 lg:ml-64 lg:h-screen lg:overflow-hidden lg:pb-0">
                 {/* Header */}
-                <div className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between gap-3">
+                <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-background/80 px-4 py-3 backdrop-blur-xl sm:px-6">
                     <div className="min-w-0">
-                        <h1 className="text-base sm:text-xl font-display font-bold text-foreground uppercase tracking-tight truncate">
+                        <h1 className="truncate text-lg font-semibold text-foreground sm:text-xl">
                             {navItems.find((n) => n.id === activeTab)?.label ?? "Dashboard"}
                         </h1>
                     </div>
@@ -500,27 +501,28 @@ const Dashboard = () => {
                         <div className="relative">
                             <button
                                 onClick={() => setNotificationsOpen(!notificationsOpen)}
-                                className="relative w-10 h-10 rounded-xl bg-card border border-border flex items-center justify-center hover:border-primary/50 transition-colors"
+                                className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card transition-colors hover:border-primary/50"
                             >
-                                <Bell className="w-4 h-4 text-muted-foreground" />
+                                <Bell className="h-4 w-4 text-muted-foreground" />
                                 <span className="absolute top-2.5 right-2.5 w-2 h-2 bg-primary rounded-full border-2 border-card" />
                             </button>
                             <AnimatePresence>
                                 {notificationsOpen && <NotificationsPanel onClose={() => setNotificationsOpen(false)} />}
                             </AnimatePresence>
                         </div>
-                        <div className="w-10 h-10 rounded-xl bg-gradient-primary flex items-center justify-center text-white text-sm font-bold shadow-inner uppercase">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-primary text-sm font-bold uppercase text-white shadow-inner">
                             {user?.avatar ? <img src={user.avatar} className="w-full h-full object-cover" /> : initials}
                         </div>
                     </div>
                 </div>
 
-                <div className="p-3 sm:p-4 md:p-6 lg:p-10 max-w-7xl mx-auto">
+                <div className="mx-auto max-w-6xl overflow-hidden p-4 sm:p-5 lg:h-[calc(100vh-65px)] lg:p-6 lg:pt-5">
                     <motion.div
                         key={activeTab}
                         initial={{ opacity: 0, x: 10 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.3 }}
+                        className="h-full overflow-hidden"
                     >
                         {renderContent()}
                     </motion.div>
