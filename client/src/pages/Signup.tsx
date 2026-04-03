@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Eye, EyeOff, Mail, Lock, User, ArrowRight, Phone, AlertCircle, Calendar, Hash, Settings } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, User, ArrowRight, Phone, AlertCircle, Calendar, Hash, MapPin, Car } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../lib/api";
@@ -15,6 +15,7 @@ const Signup = () => {
     const [lastName, setLastName] = useState("");
     const [email, setEmail] = useState("");
     const [phone, setPhone] = useState("");
+    const [city, setCity] = useState("");
     const [password, setPassword] = useState("");
 
     // Vehicle fields (if driver)
@@ -51,7 +52,7 @@ const Signup = () => {
 
         if (step === 1) {
             // Basic validation for step 1
-            if (!firstName || !lastName || !email || !password) {
+            if (!firstName || !lastName || !email || !city || !password) {
                 setErrorMsg("Please fill out all required fields.");
                 return;
             }
@@ -93,6 +94,7 @@ const Signup = () => {
                 name: `${firstName} ${lastName}`.trim(),
                 email,
                 phone,
+                city,
                 password,
                 role,
                 vehicle: vehicleData
@@ -197,6 +199,14 @@ const Signup = () => {
                                     <div className="relative">
                                         <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-foreground/30" />
                                         <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full bg-white/5 border border-white/10 rounded-xl pl-11 pr-4 py-3.5 text-sm text-primary-foreground placeholder:text-primary-foreground/30 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all" placeholder="+1 (555) 000-0000" />
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-xs font-semibold text-primary-foreground/60 uppercase tracking-wider mb-2">City</label>
+                                    <div className="relative">
+                                        <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-primary-foreground/30" />
+                                        <input type="text" value={city} onChange={(e) => setCity(e.target.value)} required className="w-full bg-white/5 border border-white/10 rounded-xl pl-11 pr-4 py-3.5 text-sm text-primary-foreground placeholder:text-primary-foreground/30 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50 transition-all" placeholder="Islamabad" />
                                     </div>
                                 </div>
 

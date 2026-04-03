@@ -44,7 +44,7 @@ const WalletPage = () => {
                 setBookings(bookingsRes.data.data.bookings || []);
             }
         } catch (err) {
-            console.error("Failed to fetch wallet data:", err);
+            console.error("Failed to fetch fare summary data:", err);
         } finally {
             setLoading(false);
         }
@@ -145,7 +145,7 @@ const WalletPage = () => {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `wallet-transactions-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.download = `fare-summary-${new Date().toISOString().slice(0, 10)}.csv`;
         link.click();
         URL.revokeObjectURL(url);
         toast.success("Transactions exported");
@@ -153,18 +153,18 @@ const WalletPage = () => {
 
     const handleAddFunds = () => {
         fetchData();
-        toast.success("Wallet refreshed");
+        toast.success("Fare summary refreshed");
     };
 
     return (
         <div className="space-y-4">
             <div className="flex items-start sm:items-center justify-between gap-3 flex-wrap">
                 <div>
-                    <h2 className="text-xl font-semibold text-foreground">Wallet</h2>
+                    <h2 className="text-xl font-semibold text-foreground">Fare Summary</h2>
                 </div>
                 <div className="flex gap-2 sm:gap-3 flex-wrap w-full sm:w-auto">
                     <Button onClick={exportTransactions} variant="outline" className="gap-2 w-full sm:w-auto"><Download className="w-4 h-4" /> Export</Button>
-                    <Button onClick={handleAddFunds} className="bg-gradient-primary text-white shadow-glow hover:opacity-90 gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> Refresh Wallet</Button>
+                    <Button onClick={handleAddFunds} className="bg-gradient-primary text-white shadow-glow hover:opacity-90 gap-2 w-full sm:w-auto"><Plus className="w-4 h-4" /> Refresh Summary</Button>
                 </div>
             </div>
 
@@ -284,7 +284,7 @@ const WalletPage = () => {
                 className="bg-card rounded-2xl border border-border/50 overflow-hidden"
             >
                 <div className="px-6 py-5 border-b border-border text-foreground font-bold font-display">
-                    Recent Trips & Transactions
+                    Recent Trips & Fare Records
                 </div>
                 <div className="divide-y divide-border">
                     {riderBookings.length > 0 ? riderBookings.map((tx, i) => (
@@ -313,7 +313,7 @@ const WalletPage = () => {
             </motion.div>
             ) : (
             <div className="rounded-2xl border border-border/50 bg-card p-4">
-                <p className="text-sm font-semibold text-foreground">Recent Trips & Transactions</p>
+                <p className="text-sm font-semibold text-foreground">Recent Trips & Fare Records</p>
                 <p className="text-xs text-muted-foreground mt-1">
                     Locked on Free. Upgrade to Plus for booking history and detailed transaction tracking.
                 </p>

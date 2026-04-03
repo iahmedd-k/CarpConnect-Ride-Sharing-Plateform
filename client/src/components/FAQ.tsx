@@ -29,7 +29,7 @@ const faqs = [
     },
     {
         q: "Are there any peak-hour surge prices?",
-        a: "No. Unlike ride-hailing apps, CarpConnect doesn't surge price. Our fares are based on fixed cost-splitting, not demand — so rush hour won't surprise your wallet.",
+        a: "No. Unlike ride-hailing apps, CarpConnect doesn't surge price. Our fares are based on fixed cost-splitting, not demand — so rush hour won't surprise you.",
     },
     {
         q: "Can drivers set their own preferences?",

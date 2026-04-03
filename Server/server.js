@@ -9,7 +9,10 @@ const User = require('./models/User');
 const Match = require('./models/MatchModels');
 const { calculatePointToRouteDistance } = require('./utils/geospatial');
 const { createAndEmitNotification } = require('./utils/notifications');
-const paymentRoutes = require('./routes/PaymentRoutes');
+const {
+  createSystemChatMessage,
+  resolveChatRoomContext
+} = require('./utils/chatRooms');
 const { startRecurringJobs } = require('./utils/recurringJobs');
 
 // Load env vars
@@ -27,6 +30,22 @@ const io = new Server(server, {
     credentials: true
   }
 });
+const etaAnnouncementCache = new Map();
+
+const estimateEtaMinutes = (from, to, speedKmh = 35) => {
+  if (!Array.isArray(from) || !Array.isArray(to) || from.length < 2 || to.length < 2) return null;
+  const [fromLng, fromLat] = from.map(Number);
+  const [toLng, toLat] = to.map(Number);
+  const R = 6371;
+  const dLat = ((toLat - fromLat) * Math.PI) / 180;
+  const dLng = ((toLng - fromLng) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos((fromLat * Math.PI) / 180) *
+    Math.cos((toLat * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
+  const distanceKm = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.max(1, Math.round((distanceKm / speedKmh) * 60));
+};
 
 io.use(async (socket, next) => {
   try {
@@ -53,12 +72,45 @@ io.on('connection', (socket) => {
     }
   }
 
-  socket.on('join:chat', ({ bookingId }) => {
-    if (bookingId) socket.join(`chat:${bookingId}`);
+  socket.on('join:chat', async ({ rideId, bookingId }, callback) => {
+    try {
+      if (!socket.user?._id) {
+        callback?.({ ok: false, message: 'Authentication required.' });
+        return;
+      }
+
+      const referenceId = rideId || bookingId;
+      const context = await resolveChatRoomContext(referenceId);
+      if (!context.found) {
+        callback?.({ ok: false, message: 'Ride chat not available yet.' });
+        return;
+      }
+
+      const isParticipant = context.participants.includes(String(socket.user._id));
+      if (!isParticipant) {
+        socket.emit('chat:error', {
+          rideId: context.rideId,
+          message: 'You are not allowed to join this ride chat.'
+        });
+        callback?.({ ok: false, message: 'Forbidden.' });
+        return;
+      }
+
+      socket.join(`chat:${context.rideId}`);
+      await createSystemChatMessage(context.rideId, `${socket.user.name || 'A rider'} joined the ride chat`, io);
+      callback?.({ ok: true, rideId: context.rideId, isLocked: Boolean(context.room?.isLocked) });
+    } catch (error) {
+      console.error('join:chat error', error);
+      callback?.({ ok: false, message: 'Failed to join chat.' });
+    }
   });
 
-  socket.on('leave:chat', ({ bookingId }) => {
-    if (bookingId) socket.leave(`chat:${bookingId}`);
+  socket.on('leave:chat', async ({ rideId, bookingId }) => {
+    const referenceId = rideId || bookingId;
+    const context = await resolveChatRoomContext(referenceId);
+    if (context.found) {
+      socket.leave(`chat:${context.rideId}`);
+    }
   });
 
   socket.on('chat:send', ({ bookingId, content }) => {
@@ -101,6 +153,17 @@ io.on('connection', (socket) => {
 
         const routeCoordinates = match?.optimizedRoute?.geometry?.coordinates;
         const distanceFromRoute = calculatePointToRouteDistance(routeCoordinates, [Number(longitude), Number(latitude)]);
+        const destinationCoordinates = Array.isArray(routeCoordinates) && routeCoordinates.length
+          ? routeCoordinates[routeCoordinates.length - 1]
+          : null;
+        const etaMinutes = estimateEtaMinutes([Number(longitude), Number(latitude)], destinationCoordinates);
+        if (Number.isFinite(etaMinutes) && etaMinutes <= 30) {
+          const previousEta = etaAnnouncementCache.get(String(rideId));
+          if (previousEta !== etaMinutes) {
+            etaAnnouncementCache.set(String(rideId), etaMinutes);
+            await createSystemChatMessage(String(rideId), `Driver is ${etaMinutes} mins away`, io);
+          }
+        }
         if (!Number.isFinite(distanceFromRoute) || distanceFromRoute <= 600) return;
 
         const alertPayload = {
@@ -142,9 +205,6 @@ app.use((req, res, next) => {
   req.io = io;
   next();
 });
-// Webhook routes must be mounted before JSON parsing so Stripe signatures can be verified.
-app.use('/api/payments', paymentRoutes);
-
 // Middleware
 app.use(express.json());
 const allowedOrigins = [

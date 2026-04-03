@@ -52,9 +52,14 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  city: {
+    type: String,
+    default: '',
+    trim: true
+  },
   role: {
     type: String,
-    enum: ['rider', 'driver'],
+    enum: ['rider', 'driver', 'both'],
     default: 'rider'
   },
   vehicle: {
@@ -123,6 +128,18 @@ const userSchema = new mongoose.Schema({
   verified: {
     type: Boolean,
     default: false
+  },
+  emailVerifiedAt: {
+    type: Date,
+    default: null
+  },
+  emailVerification: {
+    type: {
+      otpHash: { type: String, default: '' },
+      expiresAt: { type: Date, default: null },
+      lastSentAt: { type: Date, default: null }
+    },
+    default: undefined
   },
   ratings: {
     type: {

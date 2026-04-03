@@ -122,11 +122,13 @@ const DriverProfile = ({ driverId, onBack }: DriverProfileProps) => {
                     <div className="flex-1 space-y-2">
                         <h2 className="text-2xl font-semibold text-foreground">{driver.name}</h2>
                         <div className="flex flex-wrap gap-2">
-                            {driver.verified && (
-                                <span className="px-3 py-1 rounded-full bg-emerald/10 text-emerald text-xs font-bold uppercase tracking-wider flex items-center gap-1">
-                                    <Shield className="w-3 h-3" /> Verified
-                                </span>
-                            )}
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${
+                                driver.verified
+                                    ? "bg-emerald/10 text-emerald"
+                                    : "bg-amber-500/10 text-amber-500"
+                            }`}>
+                                <Shield className="w-3 h-3" /> {driver.verified ? "Verified" : "Not Verified"}
+                            </span>
                             <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold uppercase tracking-wider">
                                 {driver.role}
                             </span>

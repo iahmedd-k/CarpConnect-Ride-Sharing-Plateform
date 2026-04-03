@@ -6,7 +6,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const SOCKET_URL = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : 'http://localhost:5000';
-const HEALTHCHECK_URL = `${SOCKET_URL}/api/health`;
+const TOAST_DURATION_MS = 3000;
 
 const RealTimeNotifications = () => {
     const navigate = useNavigate();
@@ -18,84 +18,85 @@ const RealTimeNotifications = () => {
         let socket: ReturnType<typeof io> | null = null;
         let cancelled = false;
 
-        const connectSocket = async () => {
-            try {
-                const health = await fetch(HEALTHCHECK_URL, { method: 'GET' });
-                if (!health.ok || cancelled) return;
+        const connectSocket = () => {
+            socket = io(SOCKET_URL, {
+                auth: { token },
+                transports: ['polling', 'websocket'],
+                timeout: 5000,
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1500,
+            });
 
-                socket = io(SOCKET_URL, {
-                    auth: { token },
-                    transports: ['polling', 'websocket'],
-                    timeout: 5000,
-                    reconnection: true,
-                    reconnectionAttempts: 3,
-                    reconnectionDelay: 1500,
-                });
+            socket.on('connect', () => {
+                console.log('Real-time notifications socket connected');
+            });
 
-                socket.on('connect', () => {
-                    console.log('Real-time notifications socket connected');
-                });
-
-                socket.on('connect_error', (error) => {
+            socket.on('connect_error', (error) => {
+                if (!cancelled) {
                     console.warn('Notifications socket unavailable:', error.message);
+                }
+            });
+
+            const handleNotification = (notif: any) => {
+                if (!notif) return;
+
+                toast(notif.title || 'New Notification', {
+                    description: notif.body || notif.message,
+                    icon: getIcon(notif.type),
+                    duration: TOAST_DURATION_MS,
+                    action: notif.link ? {
+                        label: 'View',
+                        onClick: () => navigate(notif.link)
+                    } : undefined,
                 });
+            };
 
-                const handleNotification = (notif: any) => {
-                    console.log('New notification received:', notif);
+            socket.on('notification', handleNotification);
+            socket.on('newNotification', handleNotification);
 
-                    toast(notif.title || 'New Notification', {
-                        description: notif.body || notif.message,
-                        icon: getIcon(notif.type),
-                        duration: 6000,
-                        action: notif.link ? {
-                            label: 'View',
-                            onClick: () => navigate(notif.link)
-                        } : undefined,
-                    });
-                };
-
-                socket.on('notification', handleNotification);
-                socket.on('newNotification', handleNotification);
-
-                socket.on('rideStarted', () => {
-                    toast.success("Ride Started", {
-                        description: "The driver has started the journey. Track live location now.",
-                        action: { label: "Track", onClick: () => navigate('/driver-dashboard?tab=live') }
-                    });
+            socket.on('rideStarted', () => {
+                toast.success("Ride Started", {
+                    description: "The driver has started the journey. Track live location now.",
+                    duration: TOAST_DURATION_MS,
+                    action: { label: "Track", onClick: () => navigate('/driver-dashboard?tab=live') }
                 });
+            });
 
-                socket.on('rideCompleted', () => {
-                    toast.success("Ride Completed", {
-                        description: "The journey has ended successfully. Hope you had a great ride!",
-                    });
+            socket.on('rideCompleted', () => {
+                toast.success("Ride Completed", {
+                    description: "The journey has ended successfully. Hope you had a great ride!",
+                    duration: TOAST_DURATION_MS,
                 });
+            });
 
-                socket.on('passengerPickedUp', () => {
-                    toast.info("Passenger Picked Up", {
-                        description: "A co-rider has joined the ride.",
-                    });
+            socket.on('passengerPickedUp', () => {
+                toast.info("Passenger Picked Up", {
+                    description: "A co-rider has joined the ride.",
+                    duration: TOAST_DURATION_MS,
                 });
+            });
 
-                socket.on('passengerDroppedOff', () => {
-                    toast.info("Passenger Dropped Off", {
-                        description: "A co-rider reached their destination.",
-                    });
+            socket.on('passengerDroppedOff', () => {
+                toast.info("Passenger Dropped Off", {
+                    description: "A co-rider reached their destination.",
+                    duration: TOAST_DURATION_MS,
                 });
+            });
 
-                socket.on('pickupSuccess', (data: any) => {
-                    toast.success("You're In!", {
-                        description: data.message || "Your pickup has been confirmed by the driver.",
-                    });
+            socket.on('pickupSuccess', (data: any) => {
+                toast.success("You're In!", {
+                    description: data.message || "Your pickup has been confirmed by the driver.",
+                    duration: TOAST_DURATION_MS,
                 });
+            });
 
-                socket.on('dropoffSuccess', (data: any) => {
-                    toast.success("Safe Arrival", {
-                        description: data.message || "You have reached your destination.",
-                    });
+            socket.on('dropoffSuccess', (data: any) => {
+                toast.success("Safe Arrival", {
+                    description: data.message || "You have reached your destination.",
+                    duration: TOAST_DURATION_MS,
                 });
-            } catch (error) {
-                console.warn('Skipping notifications socket because backend health check failed.');
-            }
+            });
         };
 
         connectSocket();

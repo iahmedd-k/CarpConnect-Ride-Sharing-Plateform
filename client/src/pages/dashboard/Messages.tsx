@@ -24,6 +24,7 @@ const Messages = () => {
     const [activeChat, setActiveChat] = useState<any>(null);
     const [newMsg, setNewMsg] = useState("");
     const [msgs, setMsgs] = useState<any[]>([]);
+    const [msgLocked, setMsgLocked] = useState(false);
     const [loading, setLoading] = useState(true);
     const [msgLoading, setMsgLoading] = useState(false);
     const [me, setMe] = useState<any>(null);
@@ -55,7 +56,9 @@ const Messages = () => {
     useEffect(() => {
         if (activeChat && socketRef.current) {
             fetchMessages(activeChat._id);
-            socketRef.current.emit("join:chat", { bookingId: activeChat._id });
+            socketRef.current.emit("join:chat", { bookingId: activeChat._id }, (response: any) => {
+                setMsgLocked(Boolean(response?.isLocked));
+            });
 
             const handleNewMessage = (msg: any) => {
                 setMsgs(prev => {
@@ -69,11 +72,17 @@ const Messages = () => {
                     return dedupeById([...prev, formattedMsg]);
                 });
             };
+            const handleRideEnded = () => {
+                setMsgLocked(true);
+                fetchMessages(activeChat._id, true);
+            };
 
             socketRef.current.on("chat:message", handleNewMessage);
+            socketRef.current.on("ride_ended", handleRideEnded);
 
             return () => {
                 socketRef.current?.off("chat:message", handleNewMessage);
+                socketRef.current?.off("ride_ended", handleRideEnded);
                 socketRef.current?.emit("leave:chat", { bookingId: activeChat._id });
             };
         }
@@ -102,6 +111,7 @@ const Messages = () => {
         try {
             const res = await api.get(`/chat/${bookingId}`);
             setMsgs(dedupeById(res.data?.data?.messages || []));
+            setMsgLocked(Boolean(res.data?.data?.room?.isLocked));
         } catch (err) {
             console.error("Failed to fetch messages:", err);
         } finally {
@@ -110,7 +120,7 @@ const Messages = () => {
     };
 
     const sendMessage = async () => {
-        if (!newMsg.trim() || !activeChat) return;
+        if (!newMsg.trim() || !activeChat || msgLocked) return;
         const text = newMsg;
         setNewMsg("");
 
@@ -212,6 +222,11 @@ const Messages = () => {
                                 </div>
 
                                 <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 bg-muted/5">
+                                    {msgLocked && (
+                                        <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-700">
+                                            This ride has ended. Group chat is now closed.
+                                        </div>
+                                    )}
                                     {msgs.map((msg, i) => (
                                         <div key={msg._id} className={`flex ${msg.sender?._id === me?._id ? "justify-end" : "justify-start"} group`}>
                                             <div className="flex items-center gap-2">
@@ -242,13 +257,14 @@ const Messages = () => {
                                     <div className="flex items-center gap-3">
                                         <input
                                             type="text"
-                                            placeholder="Type a message..."
+                                            placeholder={msgLocked ? "Chat closed for completed ride" : "Type a message..."}
                                             value={newMsg}
                                             onChange={(e) => setNewMsg(e.target.value)}
                                             onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                                            className="flex-1 bg-muted rounded-xl px-4 py-3 text-sm outline-none"
+                                            disabled={msgLocked}
+                                            className="flex-1 bg-muted rounded-xl px-4 py-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-60"
                                         />
-                                        <Button onClick={sendMessage} className="h-12 w-12 p-0 bg-primary text-white rounded-xl shadow-glow">
+                                        <Button onClick={sendMessage} disabled={msgLocked || !newMsg.trim()} className="h-12 w-12 p-0 bg-primary text-white rounded-xl shadow-glow disabled:opacity-60">
                                             <Send size={18} />
                                         </Button>
                                     </div>

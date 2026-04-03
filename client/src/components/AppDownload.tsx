@@ -19,13 +19,13 @@ const AppDownload = () => {
                             <span className="text-gradient-primary">in your pocket</span>
                         </h2>
                         <p className="text-primary-foreground/60 text-lg leading-relaxed mb-10">
-                            Download the CarpConnect app for real-time matching, live tracking, in-app payments, and your personal carbon dashboard — all on the go.
+                            Download the CarpConnect app for real-time matching, live tracking, direct fare visibility, and your personal carbon dashboard — all on the go.
                         </p>
 
                         <div className="flex flex-col sm:flex-row gap-4 mb-10">
                             {[
-                                { store: "App Store", sub: "Download on the", icon: "🍎" },
-                                { store: "Google Play", sub: "Get it on", icon: "▶" },
+                                { store: "App Store", sub: "Download on the", icon: "ðŸŽ" },
+                                { store: "Google Play", sub: "Get it on", icon: "â–¶" },
                             ].map((app) => (
                                 <motion.button
                                     key={app.store}
@@ -83,7 +83,7 @@ const AppDownload = () => {
                                     {/* App header */}
                                     <div className="px-5 py-3">
                                         <div className="text-xs text-white/40 mb-1">Good evening</div>
-                                        <div className="text-lg font-display font-bold text-white">Find Your Ride 🚗</div>
+                                        <div className="text-lg font-display font-bold text-white">Find Your Ride ðŸš—</div>
                                     </div>
 
                                     {/* Search box */}
@@ -108,7 +108,7 @@ const AppDownload = () => {
                                                 </div>
                                                 <div className="flex-1">
                                                     <div className="text-xs font-medium text-white">{dest}</div>
-                                                    <div className="text-[10px] text-white/40">{3 - i} seats · {8 + i * 3} min</div>
+                                                    <div className="text-[10px] text-white/40">{3 - i} seats Â· {8 + i * 3} min</div>
                                                 </div>
                                                 <div className="text-[10px] text-primary font-medium">${(2 + i * 1.5).toFixed(2)}</div>
                                             </motion.div>
@@ -117,7 +117,7 @@ const AppDownload = () => {
 
                                     {/* Bottom nav */}
                                     <div className="absolute bottom-4 left-0 right-0 flex justify-around px-6">
-                                        {["🏠", "🗺️", "💬", "👤"].map((icon, i) => (
+                                        {["ðŸ ", "ðŸ—ºï¸", "ðŸ’¬", "ðŸ‘¤"].map((icon, i) => (
                                             <div key={i} className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${i === 0 ? "bg-primary/20" : ""}`}>{icon}</div>
                                         ))}
                                     </div>
@@ -133,7 +133,7 @@ const AppDownload = () => {
                                 transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
                                 className="absolute -right-8 top-20 glass-dark rounded-2xl px-4 py-3 border border-white/10"
                             >
-                                <div className="text-lg font-bold text-white">4.9★</div>
+                                <div className="text-lg font-bold text-white">4.9â˜…</div>
                                 <div className="text-[10px] text-white/50">App Store</div>
                             </motion.div>
 

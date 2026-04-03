@@ -10,7 +10,9 @@ const {
   createSubscriptionCheckout,
   syncSubscriptionFromStripe,
   cancelSubscription,
-  devUpgradeSubscription
+  devUpgradeSubscription,
+  sendEmailVerificationOtp,
+  verifyEmailOtp
 } = require('../controllers/Auth.controllers');
 const { body } = require('express-validator');
 const { protect } = require('../middleware/authMiddleware');
@@ -23,6 +25,7 @@ router.post(
     body('name', 'Name is required').not().isEmpty(),
     body('email', 'Please include a valid email').isEmail(),
     body('password', 'Password must be 6 or more characters').isLength({ min: 6 }),
+    body('city', 'City is required').trim().not().isEmpty(),
     body('role', 'Role must be rider, driver, or both').isIn(['rider', 'driver', 'both'])
   ],
   registerUser
@@ -50,6 +53,14 @@ router.patch('/profile', protect, updateProfile);
 // @route   PATCH /api/auth/change-password
 // @desc    Change account password
 router.patch('/change-password', protect, changePassword);
+
+// @route   POST /api/auth/email-verification/send
+// @desc    Send OTP to current user's email
+router.post('/email-verification/send', protect, sendEmailVerificationOtp);
+
+// @route   POST /api/auth/email-verification/verify
+// @desc    Verify OTP for current user's email
+router.post('/email-verification/verify', protect, verifyEmailOtp);
 
 // @route   GET /api/auth/subscription/plans
 // @desc    List plans for current app

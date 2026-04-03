@@ -7,6 +7,7 @@ const { calculateRouteDistance, findNearestPointOnRoute, calculateRouteDeviation
 const { calculateFare, splitFare, calculateEmissionsSavings } = require('../utils/fareCalculator');
 const asyncHandler = require('express-async-handler');
 const { createAndEmitNotification } = require('../utils/notifications');
+const { optimizeMatchRoute } = require('../services/routeOptimization');
 
 const extractCoordinates = (value) => {
   const candidates = [
@@ -297,6 +298,12 @@ const createMatch = asyncHandler(async (req, res) => {
     updatedAt:       new Date()
   });
 
+  try {
+    await optimizeMatchRoute(match._id);
+  } catch (error) {
+    console.error('[route-optimization] failed to optimize match route:', error.message);
+  }
+
   // 12. Create booking first (so we have its _id for the emissions report)
   // Booking is created as 'pending' (not 'confirmed')
   const booking = await Booking.create({
@@ -308,7 +315,8 @@ const createMatch = asyncHandler(async (req, res) => {
     seatCount:     requestedSeats,
     fare:          fare, // Pass fare as Number
     currency:      offer.currency || 'PKR',
-    paymentStatus: 'pending'
+    paymentStatus: 'processed',
+    paymentMethod: 'cash'
   });
 
   // 13. FIX: EmissionsReport.create — pass estimatedSavings as a plain Number
@@ -324,10 +332,14 @@ const createMatch = asyncHandler(async (req, res) => {
 
   // 14. Update request and offer status
   request.status = 'matched';
+  request.matchId = match._id;
+  request.bookingId = booking._id;
   await request.save();
 
   offer.seatsAvailable = Math.max(0, Number(offer.seatsAvailable || 0) - requestedSeats);
   offer.status = offer.seatsAvailable <= 0 ? 'matched' : 'open';
+  offer.matchId = match._id;
+  offer.bookingId = booking._id;
   await offer.save();
 
   // 15. Emit real-time events
@@ -337,12 +349,23 @@ const createMatch = asyncHandler(async (req, res) => {
     request,
     booking
   });
+  req.io?.to(`user:${request.riderId}`).emit('requestMatched', {
+    requestId: request._id,
+    matchId: match._id,
+    bookingId: booking._id,
+    offerId: offer._id,
+    originAddress: offer.originAddress || request.originAddress || '',
+    destinationAddress: offer.destinationAddress || request.destinationAddress || '',
+    departureTime: offer.departureTime,
+    pricePerSeat: offer.pricePerSeat,
+    currency: offer.currency || 'PKR'
+  });
 
   await createAndEmitNotification(req, {
     userId: request.riderId,
     type: 'newMatch',
     title: 'New ride match found',
-    body: 'A driver match is available for your route.',
+    body: `${offer.originAddress || 'Pickup'} to ${offer.destinationAddress || 'Dropoff'} is now matched for your request.`,
     relatedId: match._id,
     relatedType: 'match',
     category: 'booking',

@@ -225,6 +225,7 @@ const toBookingResponse = (booking, rider, driver, offer, options = {}) => {
       ? {
           _id: String(rider._id),
           name: rider.name,
+          phone: rider.phone || "",
           avatar: rider.profilePhoto || '',
           ratings: {
             average: typeof rider.ratings?.average === 'number' ? rider.ratings.average : 0,
@@ -241,6 +242,7 @@ const toBookingResponse = (booking, rider, driver, offer, options = {}) => {
       ? {
           _id: String(driver._id),
           name: driver.name,
+          phone: driver.phone || "",
           avatar: driver.profilePhoto || '',
           ratings: {
             average: typeof driver.ratings?.average === 'number' ? driver.ratings.average : 0,

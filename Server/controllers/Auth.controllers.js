@@ -3,6 +3,8 @@ const jwt = require('jsonwebtoken');
 const asyncHandler = require('express-async-handler');
 const { validationResult } = require('express-validator');
 const Stripe = require('stripe');
+const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const {
   ensureSubscriptionOnUser,
   fetchUsageCounts,
@@ -13,6 +15,20 @@ const {
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
 const stripe = stripeSecret ? new Stripe(stripeSecret, { apiVersion: '2023-10-16' }) : null;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const mailTransport = process.env.SMTP_HOST
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: process.env.SMTP_USER
+        ? {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS || ''
+          }
+        : undefined
+    })
+  : nodemailer.createTransport({ jsonTransport: true });
 
 const PLAN_CATALOG = {
   free: {
@@ -63,9 +79,11 @@ const sanitizeUser = (user) => ({
   name: user.name,
   email: user.email,
   phone: user.phone,
+  city: user.city || '',
   role: user.role,
   vehicle: user.vehicle,
   profilePhoto: user.profilePhoto,
+  emailVerifiedAt: user.emailVerifiedAt || null,
   subscription: user.subscription || {
     plan: 'free',
     status: 'active',
@@ -88,6 +106,38 @@ const sanitizeUser = (user) => ({
   updatedAt: user.updatedAt
 });
 
+const generateEmailOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+
+const sendVerificationOtpEmail = async (user, otp) => {
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'no-reply@carpconnect.local';
+  const mail = await mailTransport.sendMail({
+    from,
+    to: user.email,
+    subject: 'CarpConnect email verification code',
+    text: `Your CarpConnect verification code is ${otp}. This code expires in 10 minutes.`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0f172a">
+        <h2 style="margin:0 0 12px;">Verify your CarpConnect account</h2>
+        <p style="margin:0 0 16px;">Use this one-time code to verify your email and unlock the verified safety badge.</p>
+        <div style="font-size:32px;font-weight:700;letter-spacing:8px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:16px;padding:18px 20px;text-align:center;color:#059669;">
+          ${otp}
+        </div>
+        <p style="margin:16px 0 0;font-size:13px;color:#475569;">This code expires in 10 minutes.</p>
+      </div>
+    `
+  });
+
+  if (!process.env.SMTP_HOST) {
+    console.log(`[email-verification] OTP for ${user.email}: ${otp}`);
+    console.log('[email-verification] nodemailer json transport payload:', mail.message || mail);
+  }
+};
+
+const persistSubscription = async (userDoc, subscription) => {
+  userDoc.subscription = subscription;
+  await userDoc.updateOne({ $set: { subscription } });
+};
+
 // @desc    Register a new user
 // @route   POST /api/auth/signup
 // @access  Public
@@ -100,7 +150,7 @@ const registerUser = asyncHandler(async (req, res) => {
     });
   }
 
-  const { name, email, password, phone, role, vehicle } = req.body;
+  const { name, email, password, phone, city, role, vehicle } = req.body;
 
   // Check if user exists
   const userExists = await User.findOne({ email });
@@ -116,6 +166,7 @@ const registerUser = asyncHandler(async (req, res) => {
     email,
     password,
     phone,
+    city,
     role,
     vehicle: role === 'driver' ? vehicle : undefined
   });
@@ -187,7 +238,7 @@ const getMe = asyncHandler(async (req, res) => {
 // @route   PATCH /api/auth/profile
 // @access  Private
 const updateProfile = asyncHandler(async (req, res) => {
-  const allowedFields = ['name', 'phone', 'vehicle', 'preferences', 'twoFactorEnabled', 'profilePhoto'];
+  const allowedFields = ['name', 'phone', 'city', 'vehicle', 'preferences', 'twoFactorEnabled', 'profilePhoto'];
 
   if (Object.prototype.hasOwnProperty.call(req.body, 'subscription')) {
     return res.status(403).json({
@@ -196,15 +247,21 @@ const updateProfile = asyncHandler(async (req, res) => {
     });
   }
 
+  const updates = {};
   for (const field of allowedFields) {
     if (Object.prototype.hasOwnProperty.call(req.body, field)) {
-      req.user[field] = req.body[field];
+      updates[field] = field === 'city'
+        ? String(req.body[field] || '').trim()
+        : req.body[field];
     }
   }
 
   await ensureSubscriptionOnUser(req.user);
-
-  const updatedUser = await req.user.save();
+  const updatedUser = await User.findByIdAndUpdate(
+    req.user._id,
+    { $set: updates },
+    { new: true, runValidators: true }
+  );
 
   res.status(200).json({
     success: true,
@@ -352,7 +409,7 @@ const syncSubscriptionFromStripe = asyncHandler(async (req, res) => {
     }
   };
 
-  await req.user.save();
+  await persistSubscription(req.user, req.user.subscription);
   await ensureSubscriptionOnUser(req.user);
   const usage = await fetchUsageCounts(req.user._id);
 
@@ -394,7 +451,7 @@ const cancelSubscription = asyncHandler(async (req, res) => {
     }
   };
 
-  await req.user.save();
+  await persistSubscription(req.user, req.user.subscription);
   await ensureSubscriptionOnUser(req.user);
   const usage = await fetchUsageCounts(req.user._id);
 
@@ -445,7 +502,7 @@ const devUpgradeSubscription = asyncHandler(async (req, res) => {
     }
   };
 
-  await req.user.save();
+  await persistSubscription(req.user, req.user.subscription);
   await ensureSubscriptionOnUser(req.user);
   const usage = await fetchUsageCounts(req.user._id);
 
@@ -493,6 +550,112 @@ const changePassword = asyncHandler(async (req, res) => {
   });
 });
 
+// @desc    Send email verification OTP
+// @route   POST /api/auth/email-verification/send
+// @access  Private
+const sendEmailVerificationOtp = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'User not found' });
+  }
+
+  if (user.verified) {
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: sanitizeUser(user),
+        message: 'Email is already verified.'
+      }
+    });
+  }
+
+  const lastSentAt = user.emailVerification?.lastSentAt ? new Date(user.emailVerification.lastSentAt) : null;
+  if (lastSentAt && Date.now() - lastSentAt.getTime() < 30 * 1000) {
+    return res.status(429).json({
+      success: false,
+      message: 'Please wait a few seconds before requesting another OTP.'
+    });
+  }
+
+  const otp = generateEmailOtp();
+  const otpHash = await bcrypt.hash(otp, 10);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  user.emailVerification = {
+    otpHash,
+    expiresAt,
+    lastSentAt: new Date()
+  };
+  await user.save();
+  await sendVerificationOtpEmail(user, otp);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      user: sanitizeUser(user),
+      message: process.env.SMTP_HOST
+        ? 'Verification code sent to your email.'
+        : 'Verification code generated in dev mode. Check the server console output.'
+    }
+  });
+});
+
+// @desc    Verify email OTP
+// @route   POST /api/auth/email-verification/verify
+// @access  Private
+const verifyEmailOtp = asyncHandler(async (req, res) => {
+  const otp = String(req.body?.otp || '').trim();
+  if (!/^\d{6}$/.test(otp)) {
+    return res.status(400).json({ success: false, message: 'Enter a valid 6-digit OTP.' });
+  }
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return res.status(404).json({ success: false, message: 'User not found' });
+  }
+
+  if (user.verified) {
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: sanitizeUser(user),
+        message: 'Email is already verified.'
+      }
+    });
+  }
+
+  const verification = user.emailVerification;
+  if (!verification?.otpHash || !verification?.expiresAt) {
+    return res.status(400).json({ success: false, message: 'Request a verification OTP first.' });
+  }
+
+  if (new Date(verification.expiresAt).getTime() < Date.now()) {
+    return res.status(400).json({ success: false, message: 'OTP has expired. Request a new one.' });
+  }
+
+  const isMatch = await bcrypt.compare(otp, verification.otpHash);
+  if (!isMatch) {
+    return res.status(400).json({ success: false, message: 'Incorrect verification code.' });
+  }
+
+  user.verified = true;
+  user.emailVerifiedAt = new Date();
+  user.emailVerification = {
+    otpHash: '',
+    expiresAt: null,
+    lastSentAt: verification.lastSentAt || new Date()
+  };
+  await user.save();
+
+  res.status(200).json({
+    success: true,
+    data: {
+      user: sanitizeUser(user),
+      message: 'Email verified successfully.'
+    }
+  });
+});
+
 // Generate JWT
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -510,5 +673,7 @@ module.exports = {
   createSubscriptionCheckout,
   syncSubscriptionFromStripe,
   cancelSubscription,
-  devUpgradeSubscription
+  devUpgradeSubscription,
+  sendEmailVerificationOtp,
+  verifyEmailOtp
 };

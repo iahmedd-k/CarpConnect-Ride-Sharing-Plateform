@@ -19,10 +19,12 @@
     "express": "^5.2.1",
     "express-async-handler": "^1.2.0",
     "express-validator": "^7.3.1",
+    "firebase": "^12.11.0",
     "geolib": "^3.3.4",
     "h3-js": "^4.4.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.3.1",
+    "nodemailer": "^8.0.4",
     "nodemon": "^3.1.14",
     "socket.io": "^4.8.3",
     "stripe": "^20.4.1"

@@ -23,7 +23,7 @@ router.put('/:id', protect, riderOnly, updateRideRequest);
 
 // @route   GET /api/rides/requests/me
 // @desc    Get current rider requests
-router.get('/me', protect, riderOnly, getMyRideRequests);
+router.get('/me', protect, getMyRideRequests);
 
 // @route   GET /api/rides/requests/driver/open
 // @desc    Get open rider requests for current driver

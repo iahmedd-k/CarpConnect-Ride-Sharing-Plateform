@@ -2,7 +2,7 @@ const RideRequest = require('../models/RideRequest');
 const RideOffer = require('../models/RideOffer');
 const Match = require('../models/MatchModels');
 const Booking = require('../models/Booking');
-const Payment = require('../models/PaymentModel');
+const { ensureChatRoomForRide, getRideParticipants } = require('../utils/chatRooms');
 const asyncHandler = require('express-async-handler');
 const { createAndEmitNotification } = require('../utils/notifications');
 const {
@@ -40,6 +40,26 @@ const addressTokens = (value = '') =>
   normalizeAddress(value)
     .split(' ')
     .filter((token) => token.length >= 2);
+
+const KNOWN_CITY_TOKENS = [
+  'islamabad',
+  'rawalpindi',
+  'lahore',
+  'karachi',
+  'peshawar',
+  'quetta',
+  'multan',
+  'faisalabad',
+  'hyderabad',
+  'sialkot',
+  'gujranwala',
+  'bahawalpur'
+];
+
+const detectCityToken = (...values) => {
+  const combined = values.map((value) => normalizeAddress(value)).join(' ');
+  return KNOWN_CITY_TOKENS.find((city) => combined.includes(city)) || null;
+};
 
 const addressSimilarity = (a = '', b = '') => {
   const tokensA = new Set(addressTokens(a));
@@ -406,6 +426,13 @@ const getMyRideRequests = asyncHandler(async (req, res) => {
     status: { $in: ['open', 'matched', 'booked', 'cancelled'] }
   })
     .populate('counterOffer.driverId', 'name profilePhoto ratings')
+    .populate({
+      path: 'bookingId',
+      populate: [
+        { path: 'driverId', select: 'name profilePhoto ratings verified' },
+        { path: 'offerId', select: 'originAddress destinationAddress departureTime pricePerSeat currency' }
+      ]
+    })
     .sort({ createdAt: -1 })
     .lean();
 
@@ -418,6 +445,13 @@ const getMyRideRequests = asyncHandler(async (req, res) => {
     status: { $in: ['open', 'matched', 'booked', 'cancelled'] }
   })
     .populate('counterOffer.driverId', 'name profilePhoto ratings')
+    .populate({
+      path: 'bookingId',
+      populate: [
+        { path: 'driverId', select: 'name profilePhoto ratings verified' },
+        { path: 'offerId', select: 'originAddress destinationAddress departureTime pricePerSeat currency' }
+      ]
+    })
     .sort({ earliestDeparture: 1, createdAt: -1 })
     .lean();
 
@@ -448,6 +482,31 @@ const getMyRideRequests = asyncHandler(async (req, res) => {
           createdAt: request.counterOffer.createdAt,
           respondedAt: request.counterOffer.respondedAt
         }
+      : null,
+    matchedBooking: request.bookingId
+      ? {
+          _id: String(request.bookingId._id),
+          status: request.bookingId.status || 'pending',
+          driver: request.bookingId.driverId
+            ? {
+                _id: String(request.bookingId.driverId._id || ''),
+                name: request.bookingId.driverId.name || 'Driver',
+                avatar: request.bookingId.driverId.profilePhoto || null,
+                ratings: request.bookingId.driverId.ratings || null,
+                verified: Boolean(request.bookingId.driverId.verified)
+              }
+            : null,
+          offer: request.bookingId.offerId
+            ? {
+                _id: String(request.bookingId.offerId._id || ''),
+                originAddress: request.bookingId.offerId.originAddress || '',
+                destinationAddress: request.bookingId.offerId.destinationAddress || '',
+                departureTime: request.bookingId.offerId.departureTime || null,
+                pricePerSeat: request.bookingId.offerId.pricePerSeat ?? request.maxPricePerSeat ?? null,
+                currency: request.bookingId.offerId.currency || request.currency || 'PKR'
+              }
+            : null
+        }
       : null
   }));
 
@@ -464,6 +523,7 @@ const getMyRideRequests = asyncHandler(async (req, res) => {
 // @route   GET /api/rides/requests/driver/open
 // @access  Private (Driver only)
 const getDriverOpenRequests = asyncHandler(async (req, res) => {
+  const limit = Math.max(1, Math.min(20, Number(req.query.limit || 20)));
   // Get driver's active offers
   const driverOffers = await RideOffer.find({
     driverId: req.user._id,
@@ -473,18 +533,35 @@ const getDriverOpenRequests = asyncHandler(async (req, res) => {
     .sort({ departureTime: 1 })
     .lean();
 
+  const driverCitySet = new Set(
+    driverOffers
+      .map((offer) => detectCityToken(offer.originAddress, offer.destinationAddress))
+      .filter(Boolean)
+  );
+
   // Get open ride requests
   const requests = await RideRequest.find({
     status: 'open',
     rejectedBy: { $ne: req.user._id }
   })
-    .populate('riderId', 'name profilePhoto ratings')
+    .populate('riderId', 'name profilePhoto ratings city')
     .sort({ createdAt: -1 })
     .lean();
+
+  const savedDriverCity = detectCityToken(req.user?.city);
+  if (savedDriverCity) {
+    driverCitySet.add(savedDriverCity);
+  }
+
+  const driverAreaLabel = driverCitySet.size > 0
+    ? Array.from(driverCitySet).map((city) => city[0].toUpperCase() + city.slice(1)).join(', ')
+    : null;
 
   const shaped = requests
     .filter((request) => request?.riderId)
     .map((request) => {
+      const requestCity = detectCityToken(request.originAddress, request.destinationAddress, request.riderId?.city);
+      const isSameCity = driverCitySet.size === 0 ? true : (requestCity ? driverCitySet.has(requestCity) : false);
       // Calculate compatibility score
       const resolvedMaxPricePerSeat =
         request.maxPricePerSeat ?? request.maxPrice ?? request.maxFare ?? null;
@@ -545,6 +622,8 @@ const getDriverOpenRequests = asyncHandler(async (req, res) => {
         createdAt: request.createdAt,
         notes: request.notes || '',
         status: request.status,
+        requestCity,
+        isSameCity,
         counterOffer: request.counterOffer?.driverId
           ? {
               driverId: String(request.counterOffer.driverId),
@@ -562,12 +641,12 @@ const getDriverOpenRequests = asyncHandler(async (req, res) => {
       };
     });
 
-  const compatibleOnly = shaped.filter((item) => Array.isArray(item.compatibleOffers) && item.compatibleOffers.length > 0);
+  const areaScoped = shaped.filter((item) => item.isSameCity);
 
   // Deduplicate effectively identical requests
   const dedupedBySignature = [];
   const seen = new Set();
-  for (const item of compatibleOnly) {
+  for (const item of areaScoped) {
     const signature = [
       item.rider?._id || '',
       item.originAddress || '',
@@ -584,11 +663,27 @@ const getDriverOpenRequests = asyncHandler(async (req, res) => {
     dedupedBySignature.push(item);
   }
 
+  dedupedBySignature.sort((a, b) => {
+    const compatibleDiff = Number(Boolean(b.compatibleOffers?.length)) - Number(Boolean(a.compatibleOffers?.length));
+    if (compatibleDiff !== 0) return compatibleDiff;
+    const scoreDiff = Number(b.matchScore || 0) - Number(a.matchScore || 0);
+    if (scoreDiff !== 0) return scoreDiff;
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+
+  const topRequests = dedupedBySignature.slice(0, limit);
+
   res.status(200).json({ 
     success: true, 
     data: { 
-      requests: dedupedBySignature,
-      total: dedupedBySignature.length
+      requests: topRequests,
+      total: topRequests.length,
+      limit,
+      scope: driverAreaLabel
+        ? `Top ${limit} requests from ${driverAreaLabel}`
+        : `Top ${limit} rider requests. Add your city in settings to see local matching first.`,
+      driverAreas: Array.from(driverCitySet),
+      needsCity: driverCitySet.size === 0
     } 
   });
 });
@@ -794,8 +889,6 @@ const respondCounterOffer = asyncHandler(async (req, res) => {
       status: 'booked'
     });
 
-    const acceptedPaymentMethod = String(req.body?.paymentMethod || 'cash').toLowerCase();
-    const useStripe = acceptedPaymentMethod === 'stripe';
     booking = await Booking.create({
       matchId: match._id,
       userId: request.riderId,
@@ -805,25 +898,18 @@ const respondCounterOffer = asyncHandler(async (req, res) => {
       seatCount: seatsNeeded,
       fare: totalFare,
       currency: request.currency || offer.currency || 'PKR',
-      paymentStatus: useStripe ? 'pending' : 'processed',
-      paymentMethod: useStripe ? 'stripe' : 'cash'
+      paymentStatus: 'processed',
+      paymentMethod: 'cash'
     });
 
     match.bookingId = booking._id;
     await match.save();
 
-    if (useStripe) {
-      await Payment.create({
-        bookingId: booking._id,
-        riderId: request.riderId,
-        driverId: offer.driverId,
-        amount: totalFare,
-        currency: request.currency || offer.currency || 'PKR',
-        status: 'pending',
-        paymentMethod: 'stripe',
-        platformFee: totalFare * 0.1
+      const rideParticipants = await getRideParticipants(offer._id);
+      await ensureChatRoomForRide(offer._id, {
+        driverId: rideParticipants.driverId || offer.driverId,
+        riderIds: rideParticipants.riderIds
       });
-    }
 
     request.status = 'booked';
     offer.seatsAvailable = Math.max(0, Number(offer.seatsAvailable || 0) - seatsNeeded);
@@ -844,7 +930,7 @@ const respondCounterOffer = asyncHandler(async (req, res) => {
       userId: request.counterOffer.driverId,
       type: 'bookingConfirmed',
       title: 'Counter offer accepted',
-      body: 'The rider accepted your counter offer and the ride is ready for payment.',
+      body: 'The rider accepted your counter offer and the ride is confirmed.',
       relatedId: booking._id,
       relatedType: 'booking',
       category: 'booking',
@@ -881,8 +967,7 @@ const respondCounterOffer = asyncHandler(async (req, res) => {
       requestId: request._id,
       action,
       status: action === 'accept' ? 'booked' : 'open',
-      bookingId: booking?._id || null,
-      paymentAmount: booking?.fare || null
+      bookingId: booking?._id || null
     }
   });
 });

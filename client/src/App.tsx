@@ -12,6 +12,7 @@ import Vision from "./pages/Vision";
 import Dashboard from "./pages/Dashboard";
 import DriverDashboard from "./pages/DriverDashboard";
 import NotFound from "./pages/NotFound";
+import PublicTrackingPage from "./pages/PublicTrackingPage";
 import ScrollToTop from "./components/ScrollToTop";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import RealTimeNotifications from "./components/RealTimeNotifications";
@@ -33,6 +34,7 @@ const App = () => (
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
           <Route path="/vision" element={<Vision />} />
+          <Route path="/track/:rideId" element={<PublicTrackingPage />} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route
             path="/driver-dashboard"

@@ -4,7 +4,7 @@ import {
   Navigation, Clock, Car, Search, Loader2, MapPin,
   ChevronDown, ChevronUp, MessageSquare, Star, AlertCircle,
   CheckCircle2, XCircle, Info, RefreshCw, Eye, Play,
-  Send, X, Trash2, CheckCheck, Check, Lock,
+  Send, X, Trash2, CheckCheck, Check, Lock, Share2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import api from "../../lib/api";
@@ -15,6 +15,8 @@ import { useNavigate } from "react-router-dom";
 import { normalizeBookingStatus } from "@/lib/rideStatus";
 import { currentPlanFromStorage, hasPlanAtLeast } from "@/lib/planAccess";
 import { normalizePlanId } from "@/lib/plans";
+import LeafletMap from "@/components/LeafletMap";
+import LiveTrackingMap from "@/components/LiveTrackingMap";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                           */
@@ -36,6 +38,38 @@ const STATUS: Record<string, { label: string; cls: string; icon: React.ElementTy
   picked_up: { label: "En Route",  cls: "bg-primary/10 text-primary border-primary/20",             icon: Navigation },
   live:      { label: "Live",      cls: "bg-purple-500/10 text-purple-400 border-purple-500/20",    icon: Navigation },
   completed: { label: "Completed", cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: CheckCircle2 },
+};
+
+const requestStatusLabel = (status: string) => {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "open") return "Pending";
+  if (normalized === "matched") return "Matched";
+  if (normalized === "booked") return "Booked";
+  if (normalized === "cancelled") return "Cancelled";
+  return normalized || "Pending";
+};
+
+const isRequestWindowExpired = (request: any) => {
+  const latest = request?.latestDeparture || request?.earliestDeparture;
+  if (!latest) return false;
+  const ts = new Date(latest).getTime();
+  return Number.isFinite(ts) && ts < Date.now();
+};
+
+const isActionableRideRequest = (request: any) => {
+  const status = String(request?.status || "").toLowerCase();
+  if (status !== "open") return false;
+  if (isRequestWindowExpired(request)) return false;
+
+  const linkedBookingStatus = request?.matchedBooking?.status
+    ? normalizeBookingStatus(request.matchedBooking.status)
+    : null;
+
+  if (linkedBookingStatus && ["pending", "confirmed", "picked_up", "live", "completed"].includes(linkedBookingStatus)) {
+    return false;
+  }
+
+  return true;
 };
 
 /* ------------------------------------------------------------------ */
@@ -94,6 +128,35 @@ function getOfferCoords(offer: any, type: "origin" | "destination"): [number, nu
   return null;
 }
 
+function toLeafletLatLng(coords: [number, number] | null): { lat: number; lng: number } | undefined {
+  if (!Array.isArray(coords) || coords.length !== 2) return undefined;
+  const [lng, lat] = coords;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  return { lat: Number(lat), lng: Number(lng) };
+}
+
+function getOfferRouteCoords(offer: any): [number, number][] {
+  const geoJsonCoords =
+    offer?.routeGeoJson?.geometry?.coordinates ||
+    offer?.routeGeoJson?.coordinates ||
+    offer?.match?.optimizedRoute?.geometry?.coordinates ||
+    [];
+  if (Array.isArray(geoJsonCoords) && geoJsonCoords.length > 1) {
+    return geoJsonCoords
+      .filter((point: any) => Array.isArray(point) && point.length === 2)
+      .map((point: [number, number]) => [Number(point[1]), Number(point[0])]);
+  }
+
+  const polylineCoords = Array.isArray(offer?.routePolyline) ? offer.routePolyline : [];
+  if (polylineCoords.length > 1) {
+    return polylineCoords
+      .filter((point: any) => Array.isArray(point) && point.length === 2)
+      .map((point: [number, number]) => [Number(point[0]), Number(point[1])]);
+  }
+
+  return [];
+}
+
 /* ------------------------------------------------------------------ */
 /*  RideTrackerModal                                                    */
 /* ------------------------------------------------------------------ */
@@ -101,6 +164,9 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [socketConnected, setSocketConnected] = useState(false);
   const [routeDeviationAlert, setRouteDeviationAlert] = useState<string | null>(null);
+  const [arrivalNotice, setArrivalNotice] = useState<string | null>(
+    booking?.arrivedAt ? "Your driver has arrived at the pickup point." : null
+  );
   const [currentBooking, setCurrentBooking] = useState<any>(booking);
   const socketRef = useRef<Socket | null>(null);
 
@@ -109,7 +175,13 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
 
   const originCoords      = getOfferCoords(offer, "origin");
   const destinationCoords = getOfferCoords(offer, "destination");
+  const routeCoords       = getOfferRouteCoords(offer);
+  const originPoint       = toLeafletLatLng(originCoords);
+  const destinationPoint  = toLeafletLatLng(destinationCoords);
   const hasMapData        = !!(originCoords && destinationCoords);
+  const driverPhone       = currentBooking?.driver?.phone || offer?.driver?.phone || null;
+  const seatCount         = currentBooking?.seatsRequested || currentBooking?.seatCount || 1;
+  const fareAmount        = currentBooking?.fare?.totalAmount || 0;
 
   /* Socket setup */
   useEffect(() => {
@@ -132,6 +204,17 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
         setCurrentBooking((prev: any) => ({ ...prev, status: data.status }));
       }
     });
+    socket.on("bookingArrived", (data: any) => {
+      if (data?.bookingId && data.bookingId === currentBooking?._id) {
+        setCurrentBooking((prev: any) => ({
+          ...prev,
+          arrivedAt: data.arrivedAt || new Date().toISOString(),
+          updatedAt: data.timestamp || new Date().toISOString(),
+        }));
+        setArrivalNotice("Your driver has arrived at the pickup point.");
+        toast.success("Driver arrived at your pickup point.");
+      }
+    });
     socket.on("routeDeviationAlert", (data: any) => {
       const message = data?.message || "Driver appears to be off the planned route.";
       setRouteDeviationAlert(message);
@@ -152,6 +235,11 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
       key: "confirmed",
       title: "Driver accepted booking",
       when: currentBooking?.updatedAt
+    },
+    {
+      key: "arrived",
+      title: "Driver arrived at pickup",
+      when: currentBooking?.arrivedAt
     },
     {
       key: "picked_up",
@@ -207,6 +295,12 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
             <span className="text-xs text-muted-foreground">
               Updated: {fmt.date(currentBooking?.updatedAt)} {fmt.time(currentBooking?.updatedAt)}
             </span>
+            <button
+              onClick={shareTrackingUrl}
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600"
+            >
+              <Share2 className="h-3 w-3" /> Share
+            </button>
           </div>
 
           {routeDeviationAlert && (
@@ -221,16 +315,40 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
             </div>
           )}
 
-          {/* Map placeholder / live map */}
+          {arrivalNotice && (
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                <div>
+                  <div className="text-sm font-semibold text-emerald-500">Driver arrived</div>
+                  <div className="text-xs text-emerald-500/80 mt-0.5">{arrivalNotice}</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Live map */}
           {hasMapData ? (
-            <div className="h-64 rounded-2xl bg-muted/20 border border-border/40 flex items-center justify-center">
-              <div className="text-center">
-                <Navigation className="w-10 h-10 mx-auto mb-2 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">
-                  {driverLocation
-                    ? `Driver at ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`
-                    : "Waiting for driver location..."}
-                </p>
+            <div className="rounded-2xl border border-border/40 overflow-hidden">
+              <div className="h-72">
+                <LiveTrackingMap
+                  rideId={String(offer?._id || booking?.offerId || booking?.matchId || "")}
+                  origin={originPoint}
+                  destination={destinationPoint}
+                />
+              </div>
+              <div className="px-4 py-3 bg-muted/10 border-t border-border/40 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Navigation className="w-4 h-4 text-primary" />
+                  <span className="text-sm font-medium text-foreground">
+                    {driverLocation
+                      ? `Driver live at ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`
+                      : "Route is ready. Waiting for the driver's live location."}
+                  </span>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  Pickup: {fmt.addr(offer?.origin?.address)}
+                </span>
               </div>
             </div>
           ) : (
@@ -244,7 +362,7 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
           )}
 
           {/* Info grid */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Status</p>
               <StatusBadge status={currentStatus} />
@@ -253,14 +371,42 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
               <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Driver</p>
               <p className="text-sm font-semibold">{currentBooking?.driver?.name || "-"}</p>
             </div>
+            <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Seats</p>
+              <p className="text-sm font-semibold">{seatCount}</p>
+            </div>
+            <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Fare</p>
+              <p className="text-sm font-semibold">{fmt.currency(fareAmount)}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Pickup</p>
+              <p className="text-sm font-semibold text-foreground">{offer?.origin?.address || "-"}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Departure: {fmt.date(offer?.departureTime)} {fmt.time(offer?.departureTime)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Drop-off</p>
+              <p className="text-sm font-semibold text-foreground">{offer?.destination?.address || "-"}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {driverPhone ? `Driver phone: ${driverPhone}` : "Driver phone not shared yet"}
+              </p>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Trip timeline</p>
             <div className="space-y-2">
               {timeline.map((item, idx) => {
-                const idxInOrder = Math.max(0, statusOrder.indexOf(item.key));
-                const passed = currentIdx >= idxInOrder;
+                const idxInOrder =
+                  item.key === "arrived"
+                    ? statusOrder.indexOf("confirmed")
+                    : Math.max(0, statusOrder.indexOf(item.key));
+                const passed = item.key === "arrived" ? Boolean(currentBooking?.arrivedAt) : currentIdx >= idxInOrder;
                 return (
                   <div key={item.key} className="flex items-center justify-between gap-3 text-xs">
                     <span className={passed ? "text-foreground font-semibold" : "text-muted-foreground"}>
@@ -287,6 +433,7 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
   const [msgs, setMsgs]     = useState<any[]>([]);
   const [text, setText]     = useState("");
   const [loading, setLoading] = useState(true);
+  const [isLocked, setIsLocked] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -297,12 +444,18 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
     const token = localStorage.getItem("carpconnect_token");
     if (!token) return;
     socketRef.current = io(SOCKET_URL, { auth: { token }, transports: ["websocket"] });
-    socketRef.current.emit("join:chat", { bookingId: booking._id });
+    socketRef.current.emit("join:chat", { bookingId: booking._id }, (response: any) => {
+      setIsLocked(Boolean(response?.isLocked));
+    });
     socketRef.current.on("chat:message", (msg: any) => {
       setMsgs(prev => prev.find(m => m._id === msg._id) ? prev : [
         ...prev,
         { _id: msg._id || Date.now(), content: msg.content, createdAt: msg.timestamp || new Date(), sender: { _id: msg.senderId } },
       ]);
+    });
+    socketRef.current.on("ride_ended", () => {
+      setIsLocked(true);
+      fetchMsgs();
     });
     return () => {
       socketRef.current?.emit("leave:chat", { bookingId: booking._id });
@@ -317,11 +470,12 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
     try {
       const res = await api.get(`/chat/${booking._id}`);
       setMsgs(res.data?.data?.messages || []);
+      setIsLocked(Boolean(res.data?.data?.room?.isLocked));
     } catch { /* silent */ } finally { setLoading(false); }
   };
 
   const send = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() || isLocked) return;
     const payload = text.trim();
     setText("");
     try {
@@ -368,6 +522,11 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-muted/5 min-h-0">
+          {isLocked && (
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-700">
+              This ride has ended. Group chat is now closed.
+            </div>
+          )}
           {loading && (
             <div className="flex justify-center pt-10">
               <Loader2 className="w-6 h-6 animate-spin text-primary/40" />
@@ -409,11 +568,15 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
             value={text}
             onChange={e => setText(e.target.value)}
             onKeyDown={e => e.key === "Enter" && !e.shiftKey && send()}
-            placeholder="Type a message…"
-            className="flex-1 bg-muted/30 rounded-xl px-4 py-2.5 text-sm outline-none border border-border focus:border-primary transition-all"
+            placeholder={isLocked ? "Chat closed for completed ride" : "Type a message..."}
+            disabled={isLocked}
+            className="flex-1 bg-muted/30 rounded-xl px-4 py-2.5 text-sm outline-none border border-border focus:border-primary transition-all disabled:cursor-not-allowed disabled:opacity-60"
           />
-          <Button onClick={send}
-            className="h-10 w-10 p-0 bg-primary text-white rounded-xl shrink-0">
+          <Button
+            onClick={send}
+            disabled={isLocked || !text.trim()}
+            className="h-10 w-10 p-0 bg-primary text-white rounded-xl shrink-0 disabled:opacity-60"
+          >
             <Send className="w-4 h-4" />
           </Button>
         </div>
@@ -464,67 +627,6 @@ function DetailDrawer({ booking, onClose }: { booking: any; onClose: () => void 
             </div>
           ))}
         </div>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  RebookModal                                                         */
-/* ------------------------------------------------------------------ */
-function RebookModal({
-  offer, onConfirm, onClose, loading,
-}: {
-  offer: any; loading: boolean; onConfirm: (s: number) => void; onClose: () => void;
-}) {
-  const [seats, setSeats] = useState(1);
-  const maxAvailable = offer.seatsAvailable || 8;
-  const max   = Math.min(maxAvailable, 8);
-  const total = (offer.pricePerSeat || 0) * seats;
-  const fmtPKR = (n: number) =>
-    new Intl.NumberFormat("en-PK", { style: "currency", currency: "PKR", minimumFractionDigits: 0 }).format(n);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-      onClick={e => e.target === e.currentTarget && onClose()}
-    >
-      <motion.div
-        initial={{ scale: 0.93, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.93, y: 20 }}
-        className="w-full max-w-sm bg-card rounded-3xl border border-border/50 shadow-2xl p-6"
-        onClick={e => e.stopPropagation()}
-      >
-        <h3 className="font-bold text-lg mb-4">Rebook this ride</h3>
-        <div className="flex justify-between bg-muted/20 rounded-2xl p-4 mb-4">
-          <div>
-            <p className="text-xs text-muted-foreground font-bold">Price / Seat</p>
-            <p className="text-xl font-black text-primary">{fmtPKR(offer.pricePerSeat || 0)}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-muted-foreground font-bold">Available</p>
-            <p className="text-xl font-black text-emerald-400">{maxAvailable}</p>
-          </div>
-        </div>
-
-        <label className="text-xs font-bold text-muted-foreground block mb-3">Number of seats</label>
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => setSeats(s => Math.max(1, s - 1))} disabled={seats <= 1}
-            className="w-12 h-12 rounded-2xl bg-muted/20 border hover:bg-muted/40 font-bold text-xl transition-all disabled:opacity-30">−</button>
-          <div className="flex-1 text-center">
-            <span className="text-4xl font-black">{seats}</span>
-          </div>
-          <button onClick={() => setSeats(s => Math.min(max, s + 1))} disabled={seats >= max}
-            className="w-12 h-12 rounded-2xl bg-muted/20 border hover:bg-muted/40 font-bold text-xl transition-all disabled:opacity-30">+</button>
-        </div>
-
-        <Button onClick={() => onConfirm(seats)} disabled={loading || max === 0}
-          className="w-full py-6 bg-primary text-white rounded-2xl font-bold">
-          {loading
-            ? <Loader2 className="w-5 h-5 animate-spin" />
-            : max === 0 ? "Seats Full"
-            : `Confirm ${seats} seat${seats > 1 ? "s" : ""} · ${fmtPKR(total)}`}
-        </Button>
       </motion.div>
     </motion.div>
   );
@@ -588,8 +690,6 @@ const MyRides = () => {
   const [trackBooking,      setTrackBooking]      = useState<any>(null);
   const [reviewBooking,     setReviewBooking]     = useState<any>(null);
   const [completedPrompt,   setCompletedPrompt]   = useState<any>(null);
-  const [rebookOffer,       setRebookOffer]       = useState<any>(null);
-  const [rebookingLoading,  setRebookingLoading]  = useState(false);
   const [me,                setMe]                = useState<any>(null);
 
   useEffect(() => {
@@ -611,9 +711,7 @@ const MyRides = () => {
       }));
       const nextRequests = requestRes.data?.data?.requests || [];
       setBookings(nextBookings.filter((booking: any) => !booking.hiddenForRider));
-      setRideRequests(
-        nextRequests.filter((request: any) => ["open", "matched"].includes(String(request?.status || "").toLowerCase()))
-      );
+      setRideRequests(nextRequests);
     } catch {
       toast.error("Failed to load rider trips.");
     } finally {
@@ -651,20 +749,6 @@ const MyRides = () => {
     }
   };
 
-  const executeRebook = async (seatsNeeded: number) => {
-    if (!rebookOffer) return;
-    setRebookingLoading(true);
-    try {
-      await api.post("/rides/book-direct", { offerId: rebookOffer._id, seatsNeeded });
-      toast.success("Ride rebooked! 🎉");
-      setRebookOffer(null);
-      fetchRiderData();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Rebooking failed.");
-    } finally {
-      setRebookingLoading(false);
-    }
-  };
 
   // Step 3: Add real-time updates for booking status (optional, for best UX)
   useEffect(() => {
@@ -681,6 +765,19 @@ const MyRides = () => {
           }
           return next;
         }));
+      }
+    });
+    socket.on("matchCreated", () => {
+      toast.success("A ride match was found for one of your requests.");
+      fetchRiderData();
+    });
+    socket.on("requestMatched", () => {
+      toast.success("Your ride request has a matching offer now.");
+      fetchRiderData();
+    });
+    socket.on("requestUpdated", (data: any) => {
+      if (data?.requestId) {
+        fetchRiderData();
       }
     });
     return () => { socket.disconnect(); };
@@ -713,11 +810,9 @@ const MyRides = () => {
 
   const paged      = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const activeRequests = rideRequests.filter((request: any) =>
-    ["open", "matched"].includes(String(request?.status || "").toLowerCase())
-  );
+  const activeRequests = rideRequests.filter((request: any) => isActionableRideRequest(request));
   const activeRideCount = bookings.filter(b => ["confirmed", "picked_up", "live"].includes(b.status)).length;
-  const pendingCount = bookings.filter(b => b.status === "pending").length;
+  const pendingCount = bookings.filter(b => b.status === "pending").length + activeRequests.length;
   const completedCount = bookings.filter(b => b.status === "completed").length;
   const cancelledCount = bookings.filter(b => ["cancelled", "rejected"].includes(b.status)).length;
   const currentPlan = normalizePlanId(me?.subscription?.plan || currentPlanFromStorage());
@@ -767,9 +862,6 @@ const MyRides = () => {
           <Button variant="outline" size="sm" onClick={clearHistory} className="rounded-xl gap-2 h-10 text-red-400 border-red-500/20 hover:bg-red-500/10">
             <Trash2 className="w-4 h-4" /> Clear History
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate("/dashboard?tab=find")} className="rounded-xl gap-2 h-10">
-            <Search className="w-4 h-4" /> Find Rides
-          </Button>
           <Button variant="outline" size="sm" onClick={fetchRiderData} className="rounded-xl gap-2 h-10">
             <RefreshCw className="w-4 h-4" /> Refresh
           </Button>
@@ -797,17 +889,17 @@ const MyRides = () => {
                     Seats: {request.seatsNeeded || request.groupSize || 1}
                     {request.maxPricePerSeat ? ` • Max fare/seat: ${fmt.currency(request.maxPricePerSeat)}` : ""}
                   </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {fmt.date(request.earliestDeparture)} {fmt.time(request.earliestDeparture)}
+                    {request.latestDeparture ? ` Latest ${fmt.time(request.latestDeparture)}` : ""}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                    ["matched", "booked"].includes(String(request.status || "").toLowerCase())
-                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                      : "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                  }`}>
-                    {String(request.status || "open")}
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border bg-amber-500/10 text-amber-400 border-amber-500/20">
+                    {requestStatusLabel(String(request.status || "open"))}
                   </span>
                   <Button variant="outline" size="sm" onClick={() => navigate("/dashboard?tab=find")} className="rounded-xl h-9 text-xs">
-                    Open Find Ride
+                    Continue Search
                   </Button>
                 </div>
               </div>
@@ -967,10 +1059,27 @@ const MyRides = () => {
 
                         {["confirmed", "picked_up", "live"].includes(b.status) && (
                           canTrackRide ? (
-                            <button onClick={() => setTrackBooking(b)} title="Track Ride"
-                              className="p-2 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 font-bold tracking-wider text-[10px] uppercase flex items-center gap-1.5 transition-all">
-                              <Play className="w-3 h-3" /> Track
-                            </button>
+                            <>
+                              <button onClick={() => setTrackBooking(b)} title="Track Ride"
+                                className="p-2 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 font-bold tracking-wider text-[10px] uppercase flex items-center gap-1.5 transition-all">
+                                <Play className="w-3 h-3" /> Track
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  const rideId = b.offer?._id || b.offerId || b.matchId;
+                                  if (!rideId) {
+                                    toast.error("Tracking link is not ready yet.");
+                                    return;
+                                  }
+                                  await navigator.clipboard.writeText(`${window.location.origin}/track/${rideId}`);
+                                  toast.success("Live tracking link copied.");
+                                }}
+                                title="Share Live Tracking"
+                                className="p-2 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-bold tracking-wider text-[10px] uppercase flex items-center gap-1.5 transition-all"
+                              >
+                                <Share2 className="w-3 h-3" /> Share
+                              </button>
+                            </>
                           ) : (
                             <button
                               onClick={() => navigate("/dashboard?tab=subscription")}
@@ -993,13 +1102,6 @@ const MyRides = () => {
                           <button onClick={() => setReviewBooking(b)} title="Rate Journey"
                             className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition-all">
                             <Star className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-
-                        {["cancelled", "rejected"].includes(b.status) && b.offer && (
-                          <button onClick={() => setRebookOffer(b.offer)} title="Rebook"
-                            className="p-2 px-3 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 font-bold tracking-wider text-[10px] uppercase flex items-center gap-1.5 transition-all">
-                            <RefreshCw className="w-3 h-3" /> Rebook
                           </button>
                         )}
 
@@ -1050,7 +1152,6 @@ const MyRides = () => {
         {chatBooking    && <ChatModal       key="chat"    booking={chatBooking}    me={me}      onClose={() => setChatBooking(null)} />}
         {detailBooking  && <DetailDrawer   key="detail"  booking={detailBooking}               onClose={() => setDetailBooking(null)} />}
         {trackBooking   && <RideTrackerModal key="track" booking={trackBooking}                onClose={() => setTrackBooking(null)} />}
-        {rebookOffer    && <RebookModal     key="rebook"  offer={rebookOffer}      loading={rebookingLoading} onClose={() => setRebookOffer(null)} onConfirm={executeRebook} />}
         {reviewBooking  && (
           <RateRideModal
             key="review"
@@ -1076,3 +1177,16 @@ const MyRides = () => {
 };
 
 export default MyRides;
+  const shareTrackingUrl = async () => {
+    const rideId = offer?._id || booking?.offerId || booking?.matchId;
+    if (!rideId) {
+      toast.error("Tracking link is not ready yet.");
+      return;
+    }
+    await navigator.clipboard.writeText(`${window.location.origin}/track/${rideId}`);
+    toast.success("Live tracking link copied.");
+  };
+
+
+
+

@@ -4,6 +4,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { ArrowUp, Car, Globe, Loader2, Navigation, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import api from "@/lib/api";
+import { normalizeBookingStatus } from "@/lib/rideStatus";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -39,7 +40,10 @@ const RiderOverviewCompact = ({ user, onBookRide }: Props) => {
           localStorage.setItem("carpconnect_user", JSON.stringify(refreshedUser));
         }
 
-        const bookings = (bookingsRes.data?.data?.bookings || []).filter((booking: any) => !booking.hiddenForRider);
+        const bookings = (bookingsRes.data?.data?.bookings || []).map((booking: any) => ({
+          ...booking,
+          status: normalizeBookingStatus(booking?.status),
+        })).filter((booking: any) => !booking.hiddenForRider);
         const spendingSummary = spendingRes.data?.data?.summary || {};
         const emissionsStats = emissionsRes.data?.data?.stats || {};
         const completedBookings = bookings.filter((b: any) => b.status === "completed" && b.paymentStatus === "processed");
@@ -62,7 +66,9 @@ const RiderOverviewCompact = ({ user, onBookRide }: Props) => {
         });
 
         const recent = bookings
-          .filter((b: any) => !["cancelled", "rejected"].includes(String(b.status || "")))
+          .filter((b: any) => ["confirmed", "picked_up", "live", "completed"].includes(String(b.status || "").toLowerCase()))
+          .filter((b: any) => b.offer?._id || b.offerId || b.matchId)
+          .filter((b: any) => b.offer?.origin?.address || b.offer?.destination?.address || b.driver?.name)
           .sort((a: any, b: any) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime())
           .slice(0, 5);
 
@@ -99,6 +105,10 @@ const RiderOverviewCompact = ({ user, onBookRide }: Props) => {
     { icon: Wallet, label: "Total Spent", value: `PKR ${stats.totalSpent.toLocaleString()}`, meta: `Avg PKR ${stats.averagePerRide.toFixed(0)}/ride`, color: "text-foreground" },
     { icon: Globe, label: "CO2 Saved", value: `${stats.co2Saved.toFixed(1)} kg`, meta: "Environmental impact", color: "text-emerald" },
   ];
+  const chartYearLabel = new Date().getFullYear();
+  const realRecentBookings = stats.recentBookings.filter((booking: any) =>
+    booking?._id && (booking?.offer?.origin?.address || booking?.offer?.destination?.address || booking?.driver?.name || booking?.fare?.totalAmount)
+  );
 
   return (
     <div className="space-y-4">
@@ -109,18 +119,18 @@ const RiderOverviewCompact = ({ user, onBookRide }: Props) => {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.06 }}
-            className="rounded-2xl border border-border/50 bg-card p-4"
+            className="rounded-2xl border border-border/50 bg-card p-4 sm:p-5"
           >
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
                 <stat.icon className="h-5 w-5 text-primary" />
               </div>
-              <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-emerald">
+              <div className="flex max-w-full items-center gap-1 break-words text-right text-[10px] font-semibold uppercase tracking-wide text-emerald sm:text-[11px]">
                 <ArrowUp className="h-3 w-3" /> {stat.meta}
               </div>
             </div>
-            <div className={`mb-1 text-2xl font-semibold ${stat.color}`}>{stat.value}</div>
-            <div className="text-sm text-muted-foreground">{stat.label}</div>
+            <div className={`mb-1 break-words text-xl font-semibold leading-tight sm:text-2xl ${stat.color}`}>{stat.value}</div>
+            <div className="text-sm leading-snug text-muted-foreground">{stat.label}</div>
           </motion.div>
         ))}
       </div>
@@ -130,16 +140,16 @@ const RiderOverviewCompact = ({ user, onBookRide }: Props) => {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.18 }}
-          className="rounded-2xl border border-border/50 bg-card p-5"
+          className="rounded-2xl border border-border/50 bg-card p-4 sm:p-5"
         >
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-xl font-semibold text-foreground">Rides & Savings</h3>
+              <h3 className="text-lg font-semibold text-foreground sm:text-xl">Rides & Savings</h3>
               <p className="text-sm text-muted-foreground">Monthly overview</p>
             </div>
-            <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">2026</span>
+            <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">{chartYearLabel}</span>
           </div>
-          <ResponsiveContainer width="100%" height={190}>
+          <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={stats.rideHistory}>
               <defs>
                 <linearGradient id="riderOverviewRides" x1="0" y1="0" x2="0" y2="1">
@@ -160,27 +170,27 @@ const RiderOverviewCompact = ({ user, onBookRide }: Props) => {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.24 }}
-          className="rounded-2xl border border-border/50 bg-card p-5"
+          className="rounded-2xl border border-border/50 bg-card p-4 sm:p-5"
         >
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-xl font-semibold text-foreground">Recent Bookings</h3>
-            <Button size="sm" className="h-8 bg-primary px-4 text-xs font-semibold text-white hover:bg-primary/90" onClick={onBookRide}>
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-lg font-semibold text-foreground sm:text-xl">Recent Bookings</h3>
+            <Button size="sm" className="h-9 w-full bg-primary px-4 text-xs font-semibold text-white hover:bg-primary/90 sm:h-8 sm:w-auto" onClick={onBookRide}>
               Find Rides
             </Button>
           </div>
           <div className="max-h-[190px] space-y-3 overflow-y-auto pr-1 custom-scrollbar">
-            {stats.recentBookings.length === 0 ? (
+            {realRecentBookings.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border/50 bg-muted/5 py-8 text-center text-sm text-muted-foreground">
                 No recent bookings yet.
               </div>
             ) : (
-              stats.recentBookings.map((booking: any, i: number) => (
+              realRecentBookings.map((booking: any, i: number) => (
                 <div key={booking._id || i} className="rounded-xl border border-border/40 bg-muted/10 p-3">
-                  <div className="truncate text-sm font-semibold text-foreground">
-                    {booking.offer?.origin?.address?.split(",")[0] || "Pickup"} to {booking.offer?.destination?.address?.split(",")[0] || "Dropoff"}
+                  <div className="break-words text-sm font-semibold leading-snug text-foreground">
+                    {booking.offer?.origin?.address?.split(",")[0] || "-"} to {booking.offer?.destination?.address?.split(",")[0] || "-"}
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {booking.driver?.name || "Driver"} • PKR {booking.fare?.totalAmount || 0}
+                  <div className="mt-1 break-words text-xs leading-snug text-muted-foreground">
+                    {booking.driver?.name || "Unknown driver"} • {booking.fare?.totalAmount ? `PKR ${booking.fare.totalAmount}` : "Fare unavailable"}
                   </div>
                 </div>
               ))

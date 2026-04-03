@@ -25,6 +25,22 @@ import { normalizeOfferStatus, offerStatusLabel } from "@/lib/rideStatus";
 /*  Types — matched exactly to backend RideOffer schema                */
 /* ------------------------------------------------------------------ */
 type TimeFilter = "all" | "today" | "week" | "month";
+const WEEKDAY_OPTIONS = [
+  { code: "mon", label: "Mon" },
+  { code: "tue", label: "Tue" },
+  { code: "wed", label: "Wed" },
+  { code: "thu", label: "Thu" },
+  { code: "fri", label: "Fri" },
+  { code: "sat", label: "Sat" },
+  { code: "sun", label: "Sun" },
+] as const;
+const RECURRENCE_PRESETS = [
+  { value: "weekdays", label: "Monday-Friday" },
+  { value: "daily", label: "Every day" },
+  { value: "weekly", label: "Weekly" },
+  { value: "weekends", label: "Weekends" },
+  { value: "custom", label: "Choose days" },
+] as const;
 
 // Backend statuses can include: open, matched, booked, active, completed, cancelled
 type OfferStatus = "open" | "matched" | "booked" | "active" | "completed" | "cancelled";
@@ -39,6 +55,8 @@ interface Offer {
   driverId: string | { _id: string; name: string; email: string };
   origin: GeoPoint;
   destination: GeoPoint;
+  originAddress?: string;
+  destinationAddress?: string;
   departureTime: string;          // backend field name
   seatsAvailable: number;         // backend has NO seatsTotal
   seatsTotal?: number;
@@ -52,6 +70,7 @@ interface Offer {
   };
   isRecurring?: boolean;
   recurrencePattern?: string;
+  recurrenceDays?: string[];
   routeGeoJson?: any;
   createdAt: string;
 }
@@ -94,16 +113,18 @@ async function reverseGeocode(coords: [number, number]): Promise<string> {
 }
 
 /** Hook: resolves [lng, lat] to place name; shows "..." while loading */
-function useReverseGeocode(coords: [number, number] | undefined): string {
+function useReverseGeocode(coords: [number, number] | undefined, fallbackAddress?: string): string {
   const [label, setLabel] = useState<string>("...");
   useEffect(() => {
+    const preferred = String(fallbackAddress || "").trim();
+    if (preferred) { setLabel(preferred); return; }
     if (!coords || coords.length < 2) { setLabel("—"); return; }
     const [lng, lat] = coords;
     const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
     if (geocodeCache[key]) { setLabel(geocodeCache[key]); return; }
     setLabel("...");
     reverseGeocode(coords).then(setLabel);
-  }, [coords?.[0], coords?.[1]]);
+  }, [coords?.[0], coords?.[1], fallbackAddress]);
   return label;
 }
 
@@ -250,8 +271,8 @@ function BookingDetailsModal({ offer, onClose }: { offer: Offer; onClose: () => 
     fetch();
   }, [offer._id]);
 
-  const originLabel = useReverseGeocode(offer.origin?.coordinates);
-  const destLabel   = useReverseGeocode(offer.destination?.coordinates);
+  const originLabel = useReverseGeocode(offer.origin?.coordinates, offer.originAddress);
+  const destLabel   = useReverseGeocode(offer.destination?.coordinates, offer.destinationAddress);
   const bookedSeats = bookings.reduce((sum, booking) => sum + Number(booking.seatsRequested || booking.seatCount || booking.seats || 1), 0);
   const confirmedRiders = bookings.filter((booking) => ["confirmed", "picked_up", "live", "completed"].includes(booking.status)).length;
   const seatsTotal = Number(offer.seatsTotal || offer.seatsAvailable + bookedSeats);
@@ -448,15 +469,45 @@ function EditDialog({
     prefPets:         offer.preferences?.pets         ?? false,
     prefConversation: offer.preferences?.conversation ?? true,
     isRecurring:      offer.isRecurring || false,
-    recurrencePattern: offer.recurrencePattern || "",
+    recurrencePattern: offer.recurrencePattern || "weekdays",
+    recurrenceDays: Array.isArray(offer.recurrenceDays) ? offer.recurrenceDays : [],
   });
 
-  const setStr = (k: keyof typeof fields) =>
+  type EditableStringField =
+    | "originLat"
+    | "originLng"
+    | "destinationLat"
+    | "destinationLng"
+    | "departureTime"
+    | "seatsAvailable"
+    | "pricePerSeat"
+    | "recurrencePattern";
+  type EditableBoolField =
+    | "prefMusic"
+    | "prefSmoking"
+    | "prefPets"
+    | "prefConversation"
+    | "isRecurring";
+
+  const setStr = (k: EditableStringField) =>
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setFields((f) => ({ ...f, [k]: e.target.value }));
 
-  const toggleBool = (k: keyof typeof fields) =>
+  const toggleBool = (k: EditableBoolField) =>
     setFields((f) => ({ ...f, [k]: !f[k] }));
+
+  const toggleRecurrenceDay = (dayCode: string) =>
+    setFields((f) => ({
+      ...f,
+      recurrenceDays: f.recurrenceDays.includes(dayCode)
+        ? f.recurrenceDays.filter((day) => day !== dayCode)
+        : [...f.recurrenceDays, dayCode],
+    }));
+
+  useEffect(() => {
+    if (!fields.isRecurring || fields.recurrencePattern !== "custom" || fields.recurrenceDays.length > 0) return;
+    setFields((f) => ({ ...f, recurrenceDays: ["mon"] }));
+  }, [fields.isRecurring, fields.recurrencePattern, fields.recurrenceDays.length]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -483,6 +534,7 @@ function EditDialog({
       },
       isRecurring:      fields.isRecurring,
       recurrencePattern: fields.isRecurring ? fields.recurrencePattern : undefined,
+      recurrenceDays: fields.isRecurring && fields.recurrencePattern === "custom" ? fields.recurrenceDays : undefined,
     });
     setSaving(false);
   };
@@ -595,8 +647,59 @@ function EditDialog({
                   exit={{ opacity: 0, height: 0 }}
                   className="overflow-hidden mt-2"
                 >
-                  <FieldRow icon={<RefreshCw size={13} />} placeholder="e.g. Mon / Wed / Fri"
-                    value={fields.recurrencePattern} onChange={setStr("recurrencePattern")} />
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3 space-y-3">
+                    <div>
+                      <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                        Repeat
+                      </label>
+                      <select
+                        value={fields.recurrencePattern}
+                        onChange={(e) =>
+                          setFields((f) => {
+                            const nextPattern = e.target.value;
+                            let nextDays = f.recurrenceDays;
+                            if (nextPattern === "weekdays") nextDays = ["mon", "tue", "wed", "thu", "fri"];
+                            if (nextPattern === "weekends") nextDays = ["sat", "sun"];
+                            return { ...f, recurrencePattern: nextPattern, recurrenceDays: nextDays };
+                          })
+                        }
+                        className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-700 outline-none focus:border-emerald-400"
+                      >
+                        {RECURRENCE_PRESETS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {fields.recurrencePattern === "custom" && (
+                      <div>
+                        <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                          Select days
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                          {WEEKDAY_OPTIONS.map((day) => {
+                            const active = fields.recurrenceDays.includes(day.code);
+                            return (
+                              <button
+                                key={day.code}
+                                type="button"
+                                onClick={() => toggleRecurrenceDay(day.code)}
+                                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-all ${
+                                  active
+                                    ? "bg-emerald-500 border-emerald-500 text-white"
+                                    : "bg-white border-gray-200 text-gray-500 hover:border-emerald-300"
+                                }`}
+                              >
+                                {day.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -630,8 +733,8 @@ function CancelDialog({ offer, onClose, onConfirm }: {
   onConfirm: () => Promise<void>;
 }) {
   const [loading, setLoading] = useState(false);
-  const originName = useReverseGeocode(offer.origin?.coordinates);
-  const destName   = useReverseGeocode(offer.destination?.coordinates);
+  const originName = useReverseGeocode(offer.origin?.coordinates, offer.originAddress);
+  const destName   = useReverseGeocode(offer.destination?.coordinates, offer.destinationAddress);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
@@ -685,8 +788,8 @@ const OfferCard = forwardRef<HTMLDivElement, {
   onCancel: () => void;
   onDetails: () => void;
 }>(({ offer, summary, onEdit, onCancel, onDetails }, ref) => {
-  const originName  = useReverseGeocode(offer.origin?.coordinates);
-  const destName    = useReverseGeocode(offer.destination?.coordinates);
+  const originName  = useReverseGeocode(offer.origin?.coordinates, offer.originAddress);
+  const destName    = useReverseGeocode(offer.destination?.coordinates, offer.destinationAddress);
   const isCancelled = offer.status === "cancelled";
   const seatsTotal = Number(offer.seatsTotal || offer.seatsAvailable + summary.bookedSeats);
 

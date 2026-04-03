@@ -5,8 +5,10 @@ const Match = require('../models/MatchModels');
 const RideRequest = require('../models/RideRequest');
 const User = require('../models/User');
 const { toOfferResponse, toBookingResponse } = require('../utils/compatFormatters');
+const { optimizeMatchRoute, applyOptimizationDecision } = require('../services/routeOptimization');
 
 const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'picked_up', 'live'];
+const PUBLIC_BOOKING_STATUSES = ['pending', 'confirmed', 'picked_up', 'live', 'completed'];
 
 const getActiveRide = asyncHandler(async (req, res) => {
   const candidateOffers = await RideOffer.find({
@@ -44,7 +46,7 @@ const getActiveRide = asyncHandler(async (req, res) => {
 
     selectedOffer = offer;
     selectedBookings = bookings;
-    selectedMatch = await Match.findOne({ offerId: offer._id }).lean();
+    selectedMatch = await Match.findOne({ offerId: offer._id }).sort({ updatedAt: -1, createdAt: -1 }).lean();
     break;
   }
 
@@ -140,6 +142,132 @@ const getActiveRide = asyncHandler(async (req, res) => {
   });
 });
 
+const getPublicTrackingRide = asyncHandler(async (req, res) => {
+  const ride = await RideOffer.findById(req.params.rideId).lean();
+
+  if (!ride) {
+    return res.status(404).json({
+      success: false,
+      message: 'Ride not found'
+    });
+  }
+
+  const [driver, bookings] = await Promise.all([
+    User.findById(ride.driverId)
+      .select('name verified vehicle profilePhoto phone')
+      .lean(),
+    Booking.find({
+      offerId: ride._id,
+      status: { $in: PUBLIC_BOOKING_STATUSES }
+    }).lean()
+  ]);
+
+  const riderIds = [...new Set(bookings.map((booking) => String(booking.userId || '')).filter(Boolean))];
+  const riders = riderIds.length
+    ? await User.find({ _id: { $in: riderIds } })
+      .select('name verified profilePhoto phone')
+      .lean()
+    : [];
+  const riderMap = new Map(riders.map((rider) => [String(rider._id), rider]));
+
+  const hasLiveMovement = bookings.some((booking) => ['picked_up', 'live'].includes(String(booking.status || '').toLowerCase()));
+  const hasAnyBooking = bookings.length > 0;
+  const allFinished = hasAnyBooking && bookings.every((booking) =>
+    ['completed', 'cancelled'].includes(String(booking.status || '').toLowerCase())
+  );
+
+  const status = allFinished || String(ride.status || '').toLowerCase() === 'completed'
+    ? 'completed'
+    : hasLiveMovement || ['active', 'booked', 'matched', 'open'].includes(String(ride.status || '').toLowerCase())
+      ? 'active'
+      : 'scheduled';
+
+  res.status(200).json({
+    success: true,
+    data: {
+      ride: {
+        _id: String(ride._id),
+        status,
+        departureTime: ride.departureTime || null,
+        origin: {
+          address: ride.originAddress || 'Pickup',
+          coordinates: ride.origin?.coordinates || []
+        },
+        destination: {
+          address: ride.destinationAddress || 'Dropoff',
+          coordinates: ride.destination?.coordinates || []
+        },
+        completedAt: ride.completedAt || null,
+        driver: driver ? {
+          _id: String(driver._id),
+          name: driver.name || 'Driver',
+          verified: Boolean(driver.verified),
+          avatar: driver.profilePhoto || '',
+          phone: driver.phone || '',
+        } : null,
+        vehicle: driver?.vehicle || null,
+        riders: bookings.map((booking) => {
+          const rider = riderMap.get(String(booking.userId || ''));
+          return {
+            _id: rider ? String(rider._id) : String(booking.userId || ''),
+            name: rider?.name || 'Rider',
+            verified: Boolean(rider?.verified),
+            avatar: rider?.profilePhoto || '',
+            phone: rider?.phone || '',
+            seatCount: Number(booking.seatCount || 1),
+            status: booking.status || 'pending'
+          };
+        }),
+        safety: {
+          activeRiderCount: bookings.filter((booking) => ['confirmed', 'picked_up', 'live'].includes(String(booking.status || '').toLowerCase())).length,
+          completedRiderCount: bookings.filter((booking) => String(booking.status || '').toLowerCase() === 'completed').length,
+          totalSeatsBooked: bookings.reduce((sum, booking) => sum + Number(booking.seatCount || 1), 0)
+        }
+      }
+    }
+  });
+});
+
+const optimizeMatchedRide = asyncHandler(async (req, res) => {
+  const { matchId } = req.params;
+  const { decision } = req.body || {};
+
+  const match = await Match.findById(matchId).lean();
+  if (!match) {
+    return res.status(404).json({
+      success: false,
+      message: 'Match not found'
+    });
+  }
+
+  if (String(match.driverId) !== String(req.user._id)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Only the matched driver can optimize this route'
+    });
+  }
+
+  let optimizedRoute;
+  if (decision) {
+    optimizedRoute = await applyOptimizationDecision(matchId, String(decision).toLowerCase());
+  } else {
+    optimizedRoute = await optimizeMatchRoute(matchId);
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      matchId,
+      optimizedRoute,
+      message: decision
+        ? `Route optimization ${String(decision).toLowerCase()}ed successfully`
+        : 'Route optimization retrieved successfully'
+    }
+  });
+});
+
 module.exports = {
-  getActiveRide
+  getActiveRide,
+  getPublicTrackingRide,
+  optimizeMatchedRide
 };

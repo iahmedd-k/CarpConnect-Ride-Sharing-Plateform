@@ -55,8 +55,12 @@ export const DriverProfileModal = ({ driver, isOpen, onClose, onMessage }: Drive
                                 
                                 <h3 className="text-2xl font-display font-bold text-foreground">{driver.name}</h3>
                                 <div className="flex items-center gap-2 mt-1">
-                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald/10 text-emerald text-[10px] font-bold uppercase tracking-wider border border-emerald/20">
-                                        <Shield className="w-3 h-3" /> Verified Driver
+                                    <span className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                        driver.verified
+                                            ? "bg-emerald/10 text-emerald border-emerald/20"
+                                            : "bg-amber-500/10 text-amber-500 border-amber-500/20"
+                                    }`}>
+                                        <Shield className="w-3 h-3" /> {driver.verified ? "Verified Driver" : "Unverified Driver"}
                                     </span>
                                     {driver.ratings?.average > 4.7 && (
                                         <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-bold uppercase tracking-wider border border-primary/20">

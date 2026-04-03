@@ -11,6 +11,8 @@ import { Link } from "react-router-dom";
 import api from "../../lib/api";
 import { io, Socket } from "socket.io-client";
 import { toast } from "sonner";
+import { useDriverTracking } from "@/hooks/useDriverTracking";
+import RouteOptimizationScreen from "@/components/RouteOptimizationScreen";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                           */
@@ -271,6 +273,7 @@ const LiveRide = () => {
   const [rideStatus,     setRideStatus]     = useState<"ready" | "in_progress" | "completed">("ready");
   const [loading,        setLoading]        = useState(true);
   const [activeRide,     setActiveRide]     = useState<any>(null);
+  const [matchData,      setMatchData]      = useState<any>(null);
   const [bookings,       setBookings]       = useState<any[]>([]);
   const [arrivedBookings,setArrivedBookings]= useState<Record<string, boolean>>({});
   const [activeStep,     setActiveStep]     = useState(0);
@@ -280,8 +283,30 @@ const LiveRide = () => {
   const [showSummary,    setShowSummary]    = useState(false);
   const [summaryData,    setSummaryData]    = useState<any>(null);
   const [completedRideSnapshot, setCompletedRideSnapshot] = useState<any>(null);
+  const [optimizingDecision, setOptimizingDecision] = useState(false);
   const socketRef  = useRef<Socket | null>(null);
-  const watchIdRef = useRef<number | null>(null);
+  const trackingRideId = activeRide?._id || completedRideSnapshot?._id || null;
+  const { error: trackingError, publishLocation } = useDriverTracking({
+    rideId: trackingRideId,
+    enabled: rideStatus === "in_progress",
+    cleanupOnComplete: rideStatus === "completed",
+    onLocation: (location) => {
+      setDriverLocation({ lat: location.lat, lng: location.lng });
+      setSpeed(location.speedKmh || 0);
+      socketRef.current?.emit("driverLocationUpdate", {
+        rideId: trackingRideId,
+        latitude: location.lat,
+        longitude: location.lng,
+        timestamp: new Date(location.updatedAt).toISOString(),
+      });
+    },
+  });
+
+  useEffect(() => {
+    if (trackingError) {
+      toast.error(trackingError);
+    }
+  }, [trackingError]);
 
   /* ---- fetch ---- */
   const fetchActiveRide = async () => {
@@ -290,6 +315,7 @@ const LiveRide = () => {
       const res = await api.get("/rides/active");
       const data = res.data?.data;
       setActiveRide(data?.ride || data);
+      setMatchData(data?.match || null);
       const nextBookings = data?.bookings || [];
       setBookings(nextBookings);
       setArrivedBookings(
@@ -301,6 +327,7 @@ const LiveRide = () => {
     } catch (error: any) {
       if (error?.response?.status === 404) {
         setActiveRide(null);
+        setMatchData(null);
         setBookings([]);
         setArrivedBookings({});
         return;
@@ -310,6 +337,33 @@ const LiveRide = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    const shouldRefreshOptimization =
+      Boolean(matchData?._id) &&
+      Boolean(matchData?.optimizedRoute?.pendingDecision) &&
+      (!Array.isArray(matchData?.optimizedRoute?.suggestedPickupOrder) ||
+        matchData.optimizedRoute.suggestedPickupOrder.length === 0);
+
+    if (!shouldRefreshOptimization) return;
+
+    let cancelled = false;
+    api.post(`/rides/optimize/${matchData._id}`)
+      .then((res) => {
+        if (cancelled) return;
+        setMatchData((prev: any) => ({
+          ...(prev || {}),
+          optimizedRoute: res.data?.data?.optimizedRoute || prev?.optimizedRoute
+        }));
+      })
+      .catch((error) => {
+        console.error("[live-ride] failed to refresh optimization:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [matchData?._id, matchData?.optimizedRoute?.pendingDecision, matchData?.optimizedRoute?.suggestedPickupOrder]);
 
   useEffect(() => {
     fetchActiveRide();
@@ -329,21 +383,8 @@ const LiveRide = () => {
       }
     });
 
-    if (navigator.geolocation) {
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        pos => {
-          const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          setDriverLocation(loc);
-          setSpeed(pos.coords.speed ? pos.coords.speed * 3.6 : 0);
-        },
-        err => console.warn("Geolocation:", err),
-        { enableHighAccuracy: true, maximumAge: 5000 }
-      );
-    }
-
     return () => {
       socketRef.current?.disconnect();
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
     };
   }, []);
 
@@ -404,7 +445,6 @@ const LiveRide = () => {
       }
       setCompletedRideSnapshot(activeRide);
       setRideStatus("completed");
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       try {
         const res = await api.get("/emissions/me");
         setSummaryData(res.data?.data);
@@ -448,9 +488,8 @@ const LiveRide = () => {
         }
         setSpeed(45);
         const next = { lat: current.lat + dLat * 0.1, lng: current.lng + dLng * 0.1 };
-        socketRef.current?.emit("driverLocationUpdate", {
-          rideId: activeRide?._id, latitude: next.lat, longitude: next.lng,
-          timestamp: new Date().toISOString(),
+        publishLocation({ lat: next.lat, lng: next.lng, speedKmh: 45 }).catch((error) => {
+          console.error("[live-ride] failed to publish simulated location:", error);
         });
         return next;
       });
@@ -458,10 +497,29 @@ const LiveRide = () => {
   };
 
   /* ---- itinerary ---- */
+  const orderedBookings = useMemo(() => {
+    const pickupOrder = matchData?.optimizedRoute?.suggestedPickupOrder || [];
+    const shouldReorder = matchData?.optimizedRoute?.selectedRoute === "suggested" && pickupOrder.length > 0;
+
+    if (!shouldReorder) {
+      return bookings;
+    }
+
+    const orderMap = new Map(
+      pickupOrder.map((item: any, index: number) => [String(item.riderId), index])
+    );
+
+    return [...bookings].sort((a: any, b: any) => {
+      const aOrder = orderMap.get(String(a?.rider?._id || "")) ?? Number.MAX_SAFE_INTEGER;
+      const bOrder = orderMap.get(String(b?.rider?._id || "")) ?? Number.MAX_SAFE_INTEGER;
+      return aOrder - bOrder;
+    });
+  }, [bookings, matchData?.optimizedRoute?.selectedRoute, matchData?.optimizedRoute?.suggestedPickupOrder]);
+
   const itinerary = useMemo(() => {
     if (activeRide?.stops?.length) {
       return activeRide.stops.map((s: any) => {
-        const b = bookings.find((bk: any) => bk._id === s.bookingId);
+        const b = orderedBookings.find((bk: any) => bk._id === s.bookingId);
         return {
           id: `${s.bookingId}_${s.type}`, bookingId: s.bookingId,
           name: b?.rider?.name || "Rider", type: s.type,
@@ -471,7 +529,7 @@ const LiveRide = () => {
         };
       });
     }
-    return bookings.flatMap((b: any) => [
+    return orderedBookings.flatMap((b: any) => [
       {
         id: `${b._id}_p`, bookingId: b._id,
         name: b.rider?.name || "Rider", type: "pickup",
@@ -487,7 +545,7 @@ const LiveRide = () => {
         isDone: b.status === "completed",
       },
     ]);
-  }, [bookings, activeRide]);
+  }, [orderedBookings, activeRide]);
 
   /* ---- auto-advance step ---- */
   useEffect(() => {
@@ -533,7 +591,7 @@ const LiveRide = () => {
   }, [driverLocation, activeStep, speed, itinerary]);
 
   /* ---- derived ---- */
-  const rideBookings     = bookings.filter((booking: any) => ["confirmed", "picked_up", "live", "completed"].includes(booking.status));
+  const rideBookings     = orderedBookings.filter((booking: any) => ["confirmed", "picked_up", "live", "completed"].includes(booking.status));
   const pickedUpCount    = rideBookings.filter((booking: any) => ["picked_up", "live", "completed"].includes(booking.status)).length;
   const liveCount        = rideBookings.filter((booking: any) => booking.status === "live").length;
   const completedRiders  = rideBookings.filter((booking: any) => booking.status === "completed").length;
@@ -568,6 +626,28 @@ const LiveRide = () => {
 
   const triggerEmergency = () => {
     window.open("tel:15", "_self");
+  };
+
+  const handleOptimizationDecision = async (decision: "accept" | "reject") => {
+    if (!matchData?._id) return;
+    try {
+      setOptimizingDecision(true);
+      const res = await api.post(`/rides/optimize/${matchData._id}`, { decision });
+      setMatchData((prev: any) => ({
+        ...(prev || {}),
+        optimizedRoute: res.data?.data?.optimizedRoute || prev?.optimizedRoute
+      }));
+      toast.success(
+        decision === "accept"
+          ? "Optimized route accepted. Pickup order is ready."
+          : "Original route kept. You can proceed with the default path."
+      );
+      await fetchActiveRide();
+    } catch (error: any) {
+      toast.error(extractApiError(error, "Failed to save route decision."));
+    } finally {
+      setOptimizingDecision(false);
+    }
   };
 
   /* ================================================================= */
@@ -609,6 +689,20 @@ const LiveRide = () => {
           </Link>
         </div>
       </div>
+    );
+  }
+
+  if (matchData?.optimizedRoute?.pendingDecision) {
+    return (
+      <RouteOptimizationScreen
+        origin={activeRide?.origin}
+        destination={activeRide?.destination}
+        optimization={matchData.optimizedRoute}
+        bookings={bookings}
+        submitting={optimizingDecision}
+        onAccept={() => handleOptimizationDecision("accept")}
+        onReject={() => handleOptimizationDecision("reject")}
+      />
     );
   }
 

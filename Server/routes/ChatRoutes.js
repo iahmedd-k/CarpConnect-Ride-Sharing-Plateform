@@ -4,13 +4,17 @@ const {
   sendMessage,
   getChatHistory,
   deleteMessage,
-  markMessagesRead
+  markMessagesRead,
+  getChatParticipants,
+  getChatSessionInfo
 } = require('../controllers/ChatController');
 const { protect } = require('../middleware/authMiddleware');
 
 router.post('/', protect, sendMessage);
-router.get('/:bookingId', protect, getChatHistory);
+router.get('/:rideId', protect, getChatHistory);
+router.get('/:rideId/participants', protect, getChatParticipants);
+router.get('/:rideId/session', protect, getChatSessionInfo);
 router.delete('/:messageId', protect, deleteMessage);
-router.post('/:bookingId/read', protect, markMessagesRead);
+router.post('/:rideId/read', protect, markMessagesRead);
 
 module.exports = router;

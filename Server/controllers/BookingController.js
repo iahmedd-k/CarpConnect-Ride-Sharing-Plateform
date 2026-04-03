@@ -5,8 +5,6 @@ const RideRequest = require('../models/RideRequest');
 const RideOffer = require('../models/RideOffer');
 const User = require('../models/User');
 const EmissionsReport = require('../models/EmissionReport');
-const Payment = require('../models/PaymentModel');
-const { processDriverPayoutInternal } = require('./PaymentController');
 const { toOfferResponse, toBookingResponse } = require('../utils/compatFormatters');
 const { createAndEmitNotification } = require('../utils/notifications');
 const {
@@ -14,6 +12,11 @@ const {
   fetchUsageCounts,
   assertUsageAllowed
 } = require('../utils/subscriptionUsage');
+const {
+  ensureChatRoomForRide,
+  getRideParticipants,
+  lockChatRoomForRide
+} = require('../utils/chatRooms');
 
 /* ====================================================================
    INTERNAL HELPERS
@@ -180,7 +183,7 @@ const hydrateBookings = async (bookings) => {
 // @route   POST /api/bookings
 // @access  Private
 const createBooking = asyncHandler(async (req, res) => {
-  const { matchId, seatCount = 1, paymentMethod = 'cash' } = req.body;
+  const { matchId, seatCount = 1 } = req.body;
 
   if (!matchId) {
     return res.status(400).json({ success: false, message: 'matchId is required' });
@@ -197,7 +200,6 @@ const createBooking = asyncHandler(async (req, res) => {
   }
 
   const seats = Math.max(1, Number(seatCount));
-  const normalizedPaymentMethod = String(paymentMethod || 'cash').toLowerCase() === 'stripe' ? 'stripe' : 'cash';
   const subscription = await ensureSubscriptionOnUser(req.user);
   const usage = await fetchUsageCounts(req.user._id);
   const allowance = assertUsageAllowed({
@@ -235,9 +237,9 @@ const createBooking = asyncHandler(async (req, res) => {
     // Store a numeric fare in Mongo; hydrateBookings normalizes the response shape.
     fare: fareAmount,
     currency,
-    status:        normalizedPaymentMethod === 'stripe' ? 'pending' : 'confirmed',
-    paymentStatus: normalizedPaymentMethod === 'stripe' ? 'pending' : 'processed',
-    paymentMethod: normalizedPaymentMethod
+    status: 'confirmed',
+    paymentStatus: 'processed',
+    paymentMethod: 'cash'
   });
 
   // Update match
@@ -255,19 +257,6 @@ const createBooking = asyncHandler(async (req, res) => {
   // Update request
   const request = await RideRequest.findById(match.requestId);
   if (request) { request.status = 'booked'; await request.save(); }
-
-  // Payment record
-  const payment = await Payment.create({
-    bookingId:     booking._id,
-    riderId:       req.user._id,
-    driverId:      offer.driverId,
-    amount:        fareAmount,
-    currency,
-    status:        normalizedPaymentMethod === 'stripe' ? 'pending' : 'succeeded',
-    paymentMethod: normalizedPaymentMethod,
-    platformFee:   fareAmount * 0.1,
-    createdAt:     new Date(),
-  });
 
   req.io?.to(`driver:${offer.driverId}`).emit('newBooking', {
     bookingId: booking._id,
@@ -288,12 +277,19 @@ const createBooking = asyncHandler(async (req, res) => {
     priority: 2
   });
 
+  if (booking.status === 'confirmed') {
+    const rideParticipants = await getRideParticipants(offer._id);
+    await ensureChatRoomForRide(offer._id, {
+      driverId: rideParticipants.driverId || offer.driverId,
+      riderIds: rideParticipants.riderIds
+    });
+  }
+
   const [shaped] = await hydrateBookings([booking]);
   return res.status(201).json({
     success: true,
     data: {
       booking: shaped,
-      payment: { id: String(payment._id), status: payment.status, amount: payment.amount, currency: payment.currency },
       message: 'Booking created successfully',
     },
   });
@@ -319,7 +315,7 @@ const cancelBooking = asyncHandler(async (req, res) => {
   }
 
   booking.status             = 'cancelled';
-  booking.paymentStatus      = booking.paymentStatus === 'processed' ? 'refunded' : 'cancelled';
+  booking.paymentStatus      = 'cancelled';
   booking.cancellationReason = req.body.reason || 'Changed plans';
   booking.cancellationTime   = new Date();
   await booking.save();
@@ -342,12 +338,6 @@ const cancelBooking = asyncHandler(async (req, res) => {
   if (request && request.status === 'booked') {
     request.status = 'matched';
     await request.save();
-  }
-
-  const payment = await Payment.findOne({ bookingId: booking._id });
-  if (payment && payment.status === 'pending') {
-    payment.status = 'cancelled';
-    await payment.save();
   }
 
   req.io?.to(`driver:${booking.driverId}`).emit('bookingCancelled', {
@@ -520,6 +510,7 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
         offer.status = 'completed';
         offer.completedAt = offer.completedAt || new Date();
         await offer.save();
+        await lockChatRoomForRide(offer._id, req.io);
       }
     }
 
@@ -527,6 +518,8 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
       const distanceKm   = calculateRouteDistance(offer.routeGeoJson, offer.origin, offer.destination);
       const emissionsResult = calculateEmissionsSavings(distanceKm);
       const emissionsSaved = Number(emissionsResult?.estimatedSavings || 0);
+      const soloDriveEmissions = Number(emissionsResult?.soloEmissions || 0);
+      const sharedRideEmissions = Number(emissionsResult?.carpoolEmissions || 0);
 
       // Only create if not already exists for this booking
       const existingReport = await EmissionsReport.findOne({
@@ -545,28 +538,59 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
           calculationMethod: 'average',
           carbonFactor: 0.171,
           calculationDetails: {
-            soloDriveEmissions: Number(emissionsResult?.soloEmissions || 0),
-            sharedRideEmissions: Number(emissionsResult?.carpoolEmissions || 0),
-            percentageSaved: Number((((emissionsResult?.estimatedSavings || 0) / Math.max(Number(emissionsResult?.soloEmissions || 1), 1)) * 100).toFixed(1)),
+            soloDriveEmissions,
+            sharedRideEmissions,
+            percentageSaved: Number(((emissionsSaved / Math.max(soloDriveEmissions, 1)) * 100).toFixed(1)),
             methodology: 'average'
           }
         });
       }
+
+      // Drivers should also see sustainability data for completed rides.
+      // Aggregate the ride impact on a single driver report per match.
+      const existingDriverReport = await EmissionsReport.findOne({
+        rideId: booking.matchId,
+        userId: booking.driverId,
+      });
+
+      if (!existingDriverReport) {
+        await EmissionsReport.create({
+          rideId: booking.matchId,
+          bookingId: booking._id,
+          userId: booking.driverId,
+          estimatedSavings: emissionsSaved,
+          distance: distanceKm,
+          calculatedFrom: 'solo-drive',
+          calculationMethod: 'average',
+          carbonFactor: 0.171,
+          calculationDetails: {
+            soloDriveEmissions,
+            sharedRideEmissions,
+            percentageSaved: Number(((emissionsSaved / Math.max(soloDriveEmissions, 1)) * 100).toFixed(1)),
+            methodology: 'average'
+          }
+        });
+      } else if (String(existingDriverReport.bookingId) !== String(booking._id)) {
+        existingDriverReport.bookingId = existingDriverReport.bookingId || booking._id;
+        existingDriverReport.estimatedSavings = Number((Number(existingDriverReport.estimatedSavings || 0) + emissionsSaved).toFixed(2));
+        existingDriverReport.distance = Math.max(Number(existingDriverReport.distance || 0), Number(distanceKm || 0));
+        existingDriverReport.calculatedFrom = 'solo-drive';
+        existingDriverReport.calculationMethod = 'average';
+        existingDriverReport.carbonFactor = 0.171;
+
+        const nextSolo = Number((Number(existingDriverReport.calculationDetails?.soloDriveEmissions || 0) + soloDriveEmissions).toFixed(2));
+        const nextShared = Number((Number(existingDriverReport.calculationDetails?.sharedRideEmissions || 0) + sharedRideEmissions).toFixed(2));
+        existingDriverReport.calculationDetails = {
+          soloDriveEmissions: nextSolo,
+          sharedRideEmissions: nextShared,
+          percentageSaved: Number(((existingDriverReport.estimatedSavings / Math.max(nextSolo, 1)) * 100).toFixed(1)),
+          methodology: 'average'
+        };
+
+        await existingDriverReport.save();
+      }
     }
 
-    // Mark payment as processed
-    const payment = await Payment.findOne({ bookingId: booking._id });
-    if (payment) {
-      if (payment.status === 'pending') {
-        payment.status = 'succeeded';
-      }
-      payment.processedAt = new Date();
-      await payment.save();
-
-      if (payment.status === 'succeeded' && !payment.driverPayoutId) {
-        await processDriverPayoutInternal(payment);
-      }
-    }
   }
 
   // Real-time events
@@ -577,18 +601,7 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
     bookingId: booking._id, status: booking.status, timestamp: new Date(),
   });
 
-  if (status === 'completed') {
-    await createAndEmitNotification(req, {
-      userId: booking.driverId,
-      type: 'paymentSuccess',
-      title: 'Payout released',
-      body: 'Your driver payout has been released for a completed ride.',
-      relatedId: booking._id,
-      relatedType: 'payment',
-      category: 'payment',
-      priority: 2
-    });
-  } else {
+  if (status !== 'completed') {
     await createAndEmitNotification(req, {
       userId: booking.userId,
       type: 'bookingUpdated',
@@ -597,6 +610,25 @@ const updateBookingStatus = asyncHandler(async (req, res) => {
       relatedId: booking._id,
       relatedType: 'booking',
       category: 'booking'
+    });
+  } else {
+    await createAndEmitNotification(req, {
+      userId: booking.userId,
+      type: 'bookingUpdated',
+      title: 'Ride completed',
+      body: 'Your ride has been marked as completed.',
+      relatedId: booking._id,
+      relatedType: 'booking',
+      category: 'booking',
+      priority: 2
+    });
+  }
+
+  if (status === 'confirmed') {
+    const rideParticipants = await getRideParticipants(booking.offerId);
+    await ensureChatRoomForRide(booking.offerId, {
+      driverId: rideParticipants.driverId || booking.driverId,
+      riderIds: rideParticipants.riderIds
     });
   }
 
@@ -732,8 +764,8 @@ const getEarningsSummary = asyncHandler(async (req, res) => {
   const riderMap = new Map(riders.map((r) => [String(r._id), r]));
 
   const totalEarnings  = bookings.reduce((sum, b) => sum + resolveFare(b.fare), 0);
-  const platformFees   = Math.round(totalEarnings * 0.1);
-  const totalBalance   = Math.max(0, totalEarnings - platformFees);
+  const platformFees   = 0;
+  const totalBalance   = totalEarnings;
   const totalRides     = bookings.length;
   const averagePerRide = totalRides > 0 ? totalEarnings / totalRides : 0;
 

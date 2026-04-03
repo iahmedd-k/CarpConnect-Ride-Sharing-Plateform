@@ -87,7 +87,7 @@ const ensureSubscriptionOnUser = async (userDoc) => {
 
   if (changed) {
     userDoc.subscription = normalizedSubscription;
-    await userDoc.save();
+    await userDoc.updateOne({ $set: { subscription: normalizedSubscription } });
   }
 
   return normalizedSubscription;

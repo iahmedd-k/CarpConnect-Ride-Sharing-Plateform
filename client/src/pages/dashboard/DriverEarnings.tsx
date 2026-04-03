@@ -129,11 +129,11 @@ const DriverEarnings = () => {
                         <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
                             <Wallet className="w-6 h-6 text-white" />
                         </div>
-                        <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-md">Net Balance</span>
+                        <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-md">Available Balance</span>
                     </div>
                     <div className="relative z-10">
                         <div className="text-3xl font-display font-black mb-1">PKR {data.totalBalance.toLocaleString()}</div>
-                        <div className="text-emerald-100 text-xs font-medium">Platform Fee (10%): PKR {(data.platformFees || 0).toLocaleString()}</div>
+                        <div className="text-emerald-100 text-xs font-medium">Subscription-based earnings with no per-ride platform fee.</div>
                     </div>
 
                 </motion.div>
@@ -173,7 +173,7 @@ const DriverEarnings = () => {
                         <span className="text-xs text-muted-foreground font-semibold">Payout Summary</span>
                     </div>
                     <div>
-                        <div className="text-lg font-bold text-foreground mb-1">Gross PKR {Number(data.totalEarnings || 0).toLocaleString()}</div>
+                        <div className="text-lg font-bold text-foreground mb-1">Total Earned PKR {Number(data.totalEarnings || 0).toLocaleString()}</div>
                         <div className="flex items-center gap-2 text-sm text-emerald">
                             <span className="flex items-center gap-1 text-xs font-bold"><CheckCircleIcon className="w-3 h-3" /> Avg PKR {Number(data.averagePerRide || 0).toFixed(0)} / ride</span>
                         </div>
@@ -233,7 +233,7 @@ const DriverEarnings = () => {
                             <tr className="border-b border-border/50 bg-muted/20">
                                 <th className="p-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Date</th>
                                 <th className="p-4 text-xs font-bold uppercase tracking-wider text-muted-foreground whitespace-nowrap">Status</th>
-                                <th className="p-4 text-xs font-bold uppercase tracking-wider text-muted-foreground text-right">Net Amount</th>
+                                <th className="p-4 text-xs font-bold uppercase tracking-wider text-muted-foreground text-right">Amount</th>
                             </tr>
                         </thead>
                         <tbody>

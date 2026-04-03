@@ -11,7 +11,7 @@ const GoogleMap = ({ polyline, origin, destination }: GoogleMapProps) => {
     const mapRef = useRef<HTMLDivElement>(null);
     const googleMapRef = useRef<google.maps.Map | null>(null);
 
-    const apiKey = "AIzaSyAOVYRIgupAurZup5y1PRh8Ismb1A3lLao"; // Extracted from your env
+    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
 
     useEffect(() => {
         loadGoogleMaps(apiKey).then(() => {

@@ -20,6 +20,34 @@ const {
   fetchUsageCounts,
   assertUsageAllowed
 } = require('../utils/subscriptionUsage');
+const { lockChatRoomForRide } = require('../utils/chatRooms');
+const { materializeOfferOccurrence } = require('../utils/recurringJobs');
+
+const PAKISTAN_VIEWBOX = '60.85,37.12,77.84,23.63';
+const PAKISTAN_FALLBACK_SUGGESTIONS = [
+  { address: 'Blue Area, Islamabad, Pakistan', coordinates: [73.0479, 33.7074] },
+  { address: 'G-9, Islamabad, Pakistan', coordinates: [73.0138, 33.6844] },
+  { address: 'F-7 Markaz, Islamabad, Pakistan', coordinates: [73.0511, 33.7205] },
+  { address: 'DHA Phase 2, Islamabad, Pakistan', coordinates: [73.1485, 33.5169] },
+  { address: 'Saddar, Rawalpindi, Pakistan', coordinates: [73.0478, 33.5973] },
+  { address: 'Bahria Town Phase 4, Rawalpindi, Pakistan', coordinates: [73.1217, 33.5496] },
+  { address: 'Johar Town, Lahore, Pakistan', coordinates: [74.2728, 31.4697] },
+  { address: 'Model Town, Lahore, Pakistan', coordinates: [74.3168, 31.4831] },
+  { address: 'Gulberg III, Lahore, Pakistan', coordinates: [74.3447, 31.5204] },
+  { address: 'DHA Phase 5, Lahore, Pakistan', coordinates: [74.4194, 31.4692] },
+  { address: 'Gulshan-e-Iqbal, Karachi, Pakistan', coordinates: [67.0822, 24.9257] },
+  { address: 'Clifton Block 5, Karachi, Pakistan', coordinates: [67.0302, 24.8138] },
+  { address: 'North Nazimabad, Karachi, Pakistan', coordinates: [67.0411, 24.9407] },
+  { address: 'DHA Phase 6, Karachi, Pakistan', coordinates: [67.0652, 24.8015] }
+];
+const LOCATION_HINTS = [
+  { pattern: /\bblue\s*area\b/i, expansions: ['Islamabad, Pakistan'] },
+  { pattern: /\b(g|f|e|i|h)-?\d{1,2}\b/i, expansions: ['Islamabad, Pakistan'] },
+  { pattern: /\b(johar\s*town|model\s*town|gulberg|wapda\s*town)\b/i, expansions: ['Lahore, Pakistan'] },
+  { pattern: /\b(gulshan|clifton|nazimabad|saddar|north nazimabad)\b/i, expansions: ['Karachi, Pakistan'] },
+  { pattern: /\b(satellite\s*town|bahria\s*town)\b/i, expansions: ['Rawalpindi, Pakistan', 'Islamabad, Pakistan'] },
+  { pattern: /\bdha\b/i, expansions: ['Lahore, Pakistan', 'Karachi, Pakistan', 'Islamabad, Pakistan'] }
+];
 
 // @desc    Create a new ride offer
 // @route   POST /api/rides/offers
@@ -307,6 +335,7 @@ const completeRide = asyncHandler(async (req, res) => {
     completionTime: new Date(),
     emissionsSavings
   });
+  await lockChatRoomForRide(offer._id, req.io);
 
   res.status(200).json({ 
     success: true, 
@@ -323,6 +352,7 @@ const completeRide = asyncHandler(async (req, res) => {
 // @access  Public
 const searchAddressSuggestions = asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
+  const limit = Math.max(1, Math.min(10, Number(req.query.limit || 8)));
   if (!q) {
     return res.status(200).json({ 
       success: true, 
@@ -332,7 +362,7 @@ const searchAddressSuggestions = asyncHandler(async (req, res) => {
     });
   }
 
-  const regex = new RegExp(q, 'i');
+  const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
   const offers = await RideOffer.find({
     $or: [{ originAddress: regex }, { destinationAddress: regex }],
     status: { $in: ['open', 'active'] }
@@ -340,20 +370,24 @@ const searchAddressSuggestions = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(15);
 
-  const seen = new Set();
-  const results = [];
+  const localResults = [];
   for (const offer of offers) {
     const candidates = [
       { address: offer.originAddress, coordinates: offer.origin?.coordinates || null },
       { address: offer.destinationAddress, coordinates: offer.destination?.coordinates || null }
     ];
     for (const item of candidates) {
-      if (item.address && regex.test(item.address) && !seen.has(item.address.toLowerCase())) {
-        seen.add(item.address.toLowerCase());
-        results.push(item);
+      if (item.address && regex.test(item.address)) {
+        localResults.push(item);
       }
     }
   }
+
+  const [osmResults, fallbackResults] = await Promise.all([
+    fetchOsmSuggestions(q, limit),
+    Promise.resolve(fallbackMatches(q, limit))
+  ]);
+  const results = dedupeAddressResults([...localResults, ...fallbackResults, ...osmResults]).slice(0, limit);
 
   res.status(200).json({ 
     success: true, 
@@ -361,6 +395,43 @@ const searchAddressSuggestions = asyncHandler(async (req, res) => {
       results,
       total: results.length
     } 
+  });
+});
+
+// @desc    Resolve a single address to coordinates
+// @route   GET /api/rides/address-resolve
+// @access  Public
+const resolveAddressSuggestion = asyncHandler(async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) {
+    return res.status(200).json({ success: true, data: { result: null } });
+  }
+
+  const localExact = await RideOffer.findOne({
+    $or: [{ originAddress: new RegExp(`^${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }, { destinationAddress: new RegExp(`^${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }]
+  }).sort({ createdAt: -1 });
+
+  if (localExact) {
+    const exactMatch = [
+      { address: localExact.originAddress, coordinates: localExact.origin?.coordinates || null },
+      { address: localExact.destinationAddress, coordinates: localExact.destination?.coordinates || null }
+    ].find((item) => item.address && item.address.toLowerCase() === q.toLowerCase() && Array.isArray(item.coordinates));
+
+    if (exactMatch) {
+      return res.status(200).json({ success: true, data: { result: exactMatch } });
+    }
+  }
+
+  const results = dedupeAddressResults([
+    ...fallbackMatches(q, 1),
+    ...(await fetchOsmSuggestions(q, 1))
+  ]);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      result: results[0] || null
+    }
   });
 });
 
@@ -404,6 +475,16 @@ const searchByDestination = asyncHandler(async (req, res) => {
       const end = new Date(d);
       end.setHours(23, 59, 59, 999);
       query.departureTime = { $gte: start, $lte: end };
+
+      const recurringTemplates = await RideOffer.find({
+        isRecurring: true,
+        recurringParentId: null,
+        status: 'open'
+      }).lean();
+
+      for (const template of recurringTemplates) {
+        await materializeOfferOccurrence(template, start);
+      }
     }
   }
 
@@ -501,7 +582,7 @@ const searchByDestination = asyncHandler(async (req, res) => {
 // @route   POST /api/rides/book-direct
 // @access  Private (Rider only)
 const bookDirectRide = asyncHandler(async (req, res) => {
-  const { offerId, seatsNeeded = 1, paymentMethod = 'cash' } = req.body;
+  const { offerId, seatsNeeded = 1 } = req.body;
 
   if (!offerId) {
     return res.status(400).json({ 
@@ -526,8 +607,6 @@ const bookDirectRide = asyncHandler(async (req, res) => {
   }
 
   const seats = Math.max(1, Number(seatsNeeded || 1));
-  const normalizedPaymentMethod = String(paymentMethod || 'cash').toLowerCase() === 'stripe' ? 'stripe' : 'cash';
-
   const subscription = await ensureSubscriptionOnUser(req.user);
   const usage = await fetchUsageCounts(req.user._id);
   const allowance = assertUsageAllowed({
@@ -564,51 +643,86 @@ const bookDirectRide = asyncHandler(async (req, res) => {
   }
 
   const totalFare = Number((offer.pricePerSeat || 0) * seats);
-  // Create match for the booking
-  const mongoose = require('mongoose');
+  const pickupCoordinates = Array.isArray(offer?.origin?.coordinates) ? offer.origin.coordinates : [];
+  const dropoffCoordinates = Array.isArray(offer?.destination?.coordinates) ? offer.destination.coordinates : [];
+  const pickupTime = offer.departureTime ? new Date(offer.departureTime) : new Date();
+  const dropoffTime = new Date(pickupTime.getTime() + 30 * 60 * 1000);
   const dummyRequestId = new mongoose.Types.ObjectId();
-  const geoPoint = (point) => ({ type: 'Point', coordinates: Array.isArray(point?.coordinates) ? point.coordinates : point });
-  const match = await Match.create({
-    offerId: offer._id,
-    requestId: dummyRequestId, // Required field, dummy value for direct booking
-    driverId: offer.driverId,
-    riderIds: [req.user._id],
-    pickupPoints: [],
-    dropoffPoints: [],
-    optimizedRoute: offer.routeGeoJson || {},
-    fareSplits: [{
-      riderId: req.user._id,
-      amount: totalFare,
-      currency: offer.currency || 'PKR',
-      pickupPoint: geoPoint(offer.origin),
-      dropoffPoint: geoPoint(offer.destination)
-    }],
-    totalFare: totalFare,
-    matchScore: 1.0, // Perfect match since it's direct booking
-    status: 'matched'
-  });
 
-  const booking = await Booking.create({
-    matchId: match._id,
-    offerId: offer._id,
-    userId: req.user._id,
-    driverId: offer.driverId,
-    seatCount: seats,
-    fare: totalFare,
-    currency: offer.currency || 'PKR',
-    status: normalizedPaymentMethod === 'stripe' ? 'pending' : 'confirmed',
-    paymentStatus: normalizedPaymentMethod === 'stripe' ? 'pending' : 'processed',
-    paymentMethod: normalizedPaymentMethod
-  });
-
-  match.bookingId = booking._id;
-  await match.save();
-
-  offer.seatsAvailable = Math.max(0, offer.seatsAvailable - seats);
-  if (offer.seatsAvailable === 0 && offer.status === 'open') {
-    offer.status = 'matched';
+  if (pickupCoordinates.length !== 2 || dropoffCoordinates.length !== 2) {
+    return res.status(400).json({
+      success: false,
+      message: 'Ride route coordinates are incomplete for this offer'
+    });
   }
-  await offer.save();
+
+  let match;
+  let booking;
+  try {
+    match = await Match.create({
+      offerId: offer._id,
+      requestId: dummyRequestId, // Required field, dummy value for direct booking
+      driverId: offer.driverId,
+      riderIds: [req.user._id],
+      pickupPoints: [{
+        type: 'Point',
+        coordinates: pickupCoordinates,
+        time: pickupTime
+      }],
+      dropoffPoints: [{
+        type: 'Point',
+        coordinates: dropoffCoordinates,
+        time: dropoffTime
+      }],
+      optimizedRoute: offer.routeGeoJson || buildStraightRoute(pickupCoordinates, dropoffCoordinates),
+      fareSplits: [{
+        riderId: req.user._id,
+        amount: totalFare,
+        currency: offer.currency || 'PKR',
+        pickupPoint: {
+          type: 'Point',
+          coordinates: pickupCoordinates
+        },
+        dropoffPoint: {
+          type: 'Point',
+          coordinates: dropoffCoordinates
+        }
+      }],
+      totalFare: totalFare,
+      matchScore: 1.0,
+      status: 'matched'
+    });
+
+    booking = await Booking.create({
+      matchId: match._id,
+      offerId: offer._id,
+      userId: req.user._id,
+      driverId: offer.driverId,
+      seatCount: seats,
+      fare: totalFare,
+      currency: offer.currency || 'PKR',
+      status: 'pending',
+      paymentStatus: 'processed',
+      paymentMethod: 'cash'
+    });
+
+    match.bookingId = booking._id;
+    await match.save();
+
+    await offer.save();
+  } catch (error) {
+    console.error('[bookDirectRide] failed', {
+      offerId: String(offer._id),
+      riderId: String(req.user._id),
+      seats,
+      message: error?.message,
+      errors: error?.errors,
+    });
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'Direct booking failed on the server'
+    });
+  }
 
   // Emit real-time notification
   req.io?.to(`driver:${offer.driverId}`).emit('newBooking', {
@@ -709,6 +823,96 @@ const getActiveRide = asyncHandler(async (req, res) => {
 
 // Helper functions
 const normalizeAddress = (value) => String(value || '').trim().toLowerCase();
+const normalizeSearchText = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const dedupeAddressResults = (items = []) => {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = String(item?.address || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const buildQueryVariants = (query) => {
+  const trimmed = String(query || '').trim();
+  const variants = new Set();
+  if (!trimmed) return [];
+  variants.add(trimmed);
+  if (!/\bpaks?itan\b/i.test(trimmed)) {
+    variants.add(`${trimmed}, Pakistan`);
+  }
+  for (const hint of LOCATION_HINTS) {
+    if (!hint.pattern.test(trimmed)) continue;
+    for (const expansion of hint.expansions) variants.add(`${trimmed}, ${expansion}`);
+  }
+  return Array.from(variants).slice(0, 4);
+};
+
+const fallbackMatches = (query, limit = 8) => {
+  const normalized = normalizeSearchText(query);
+  if (!normalized) return [];
+  const tokens = normalized.split(' ').filter(Boolean);
+  return PAKISTAN_FALLBACK_SUGGESTIONS
+    .map((item) => {
+      const haystack = normalizeSearchText(item.address);
+      let score = 0;
+      if (haystack.startsWith(normalized)) score += 8;
+      if (haystack.includes(normalized)) score += 5;
+      for (const token of tokens) {
+        if (haystack.includes(token)) score += token.length <= 2 ? 0.75 : 1.5;
+      }
+      return { item, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.item)
+    .slice(0, limit);
+};
+
+const fetchOsmVariant = async (query, limit = 5) => {
+  const params = new URLSearchParams({
+    format: 'jsonv2',
+    addressdetails: '1',
+    countrycodes: 'pk',
+    dedupe: '1',
+    limit: String(limit),
+    'accept-language': 'en',
+    viewbox: PAKISTAN_VIEWBOX,
+    q: String(query || '').trim()
+  });
+
+  const response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'CarpoolConnect/1.0 (address search)'
+    }
+  });
+
+  if (!response.ok) return [];
+  const rows = await response.json();
+  if (!Array.isArray(rows)) return [];
+
+  return rows.map((row) => {
+    const lng = Number(row?.lon);
+    const lat = Number(row?.lat);
+    return {
+      address: String(row?.display_name || '').trim(),
+      coordinates: Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null,
+      placeId: String(row?.place_id || ''),
+      source: 'osm'
+    };
+  }).filter((item) => item.address);
+};
+
+const fetchOsmSuggestions = async (query, limit = 8) => {
+  const variants = buildQueryVariants(query);
+  if (variants.length === 0) return [];
+  const perVariantLimit = Math.max(3, Math.min(limit, 5));
+  const results = await Promise.allSettled(variants.map((variant) => fetchOsmVariant(variant, perVariantLimit)));
+  return dedupeAddressResults(results.flatMap((entry) => entry.status === 'fulfilled' ? entry.value : [])).slice(0, limit);
+};
 
 const haversineDistanceMeters = (fromLat, fromLng, toLat, toLng) => {
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -722,6 +926,15 @@ const haversineDistanceMeters = (fromLat, fromLng, toLat, toLng) => {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return earthRadiusM * c;
 };
+
+const buildStraightRoute = (originCoordinates, destinationCoordinates) => ({
+  type: 'Feature',
+  geometry: {
+    type: 'LineString',
+    coordinates: [originCoordinates, destinationCoordinates]
+  },
+  properties: {}
+});
 
 const toValidObjectIdString = (value) => {
   if (!value) return null;
@@ -806,6 +1019,7 @@ module.exports = {
   startRide,
   completeRide,
   searchAddressSuggestions,
+  resolveAddressSuggestion,
   searchByDestination,
   bookDirectRide,
   getRideHistory,

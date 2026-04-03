@@ -1,7 +1,6 @@
 const RideOffer = require('../models/RideOffer');
 const Match = require('../models/MatchModels');
 const Booking = require('../models/Booking');
-const Payment = require('../models/PaymentModel');
 const RideRequest = require('../models/RideRequest');
 const asyncHandler = require('express-async-handler');
 const { createAndEmitNotification } = require('../utils/notifications');
@@ -159,6 +158,7 @@ const createRideOffer = asyncHandler(async (req, res) => {
     destination,
     departureTime,
     seatsAvailable,
+    seatsTotal,
     pricePerSeat,
     preferences,
     isRecurring,
@@ -224,6 +224,15 @@ const createRideOffer = asyncHandler(async (req, res) => {
   }
 
   const recurringConfig = normalizeRecurringConfig(recurrencePattern, recurrenceDays);
+  const riderSeats = Math.max(1, Number(seatsTotal || seatsAvailable || 1));
+  const profileSeatLimit = Math.max(1, Number(req.user?.vehicle?.seats || 4));
+
+  if (riderSeats > profileSeatLimit) {
+    return res.status(400).json({
+      success: false,
+      message: `You can offer up to ${profileSeatLimit} seat(s) based on your vehicle profile.`
+    });
+  }
 
   // Create ride offer with complete data
   const rideOffer = await RideOffer.create({
@@ -239,7 +248,8 @@ const createRideOffer = asyncHandler(async (req, res) => {
     },
     destinationAddress: String(destination.address || '').trim(),
     departureTime,
-    seatsAvailable,
+    seatsAvailable: riderSeats,
+    seatsTotal: riderSeats,
     pricePerSeat,
     preferences: {
       music: preferences?.music ?? true,
@@ -336,10 +346,12 @@ const updateRideOffer = asyncHandler(async (req, res) => {
     destination,
     departureTime,
     seatsAvailable,
+    seatsTotal,
     pricePerSeat,
     preferences,
     isRecurring,
     recurrencePattern,
+    recurrenceDays,
     routeGeoJson
   } = req.body;
 
@@ -388,7 +400,15 @@ const updateRideOffer = asyncHandler(async (req, res) => {
   }
   
   if (seatsAvailable !== undefined) {
-    rideOffer.seatsAvailable = seatsAvailable;
+    rideOffer.seatsAvailable = Math.max(0, Number(seatsAvailable));
+  }
+
+  if (seatsTotal !== undefined) {
+    rideOffer.seatsTotal = Math.max(1, Number(seatsTotal));
+  }
+
+  if (rideOffer.seatsTotal != null && rideOffer.seatsAvailable > rideOffer.seatsTotal) {
+    rideOffer.seatsAvailable = rideOffer.seatsTotal;
   }
   
   if (pricePerSeat !== undefined) {
@@ -402,12 +422,15 @@ const updateRideOffer = asyncHandler(async (req, res) => {
     };
   }
   
-  if (isRecurring !== undefined) {
-    rideOffer.isRecurring = isRecurring;
-  }
-  
-  if (recurrencePattern) {
-    rideOffer.recurrencePattern = recurrencePattern;
+  if (isRecurring !== undefined || recurrencePattern !== undefined || recurrenceDays !== undefined) {
+    const nextIsRecurring = isRecurring !== undefined ? Boolean(isRecurring) : Boolean(rideOffer.isRecurring);
+    const recurringConfig = normalizeRecurringConfig(
+      recurrencePattern !== undefined ? recurrencePattern : rideOffer.recurrencePattern,
+      recurrenceDays !== undefined ? recurrenceDays : rideOffer.recurrenceDays
+    );
+    rideOffer.isRecurring = nextIsRecurring;
+    rideOffer.recurrencePattern = nextIsRecurring ? recurringConfig.recurrencePattern : 'daily';
+    rideOffer.recurrenceDays = nextIsRecurring ? recurringConfig.recurrenceDays : [];
   }
   
   if (routeGeoJson) {
@@ -596,23 +619,8 @@ const cancelRideOffer = asyncHandler(async (req, res) => {
     booking.status = 'cancelled';
     booking.cancellationReason = 'Driver cancelled the ride offer';
     booking.cancellationTime = new Date();
-    if (booking.paymentStatus === 'pending') {
-      booking.paymentStatus = 'cancelled';
-    } else if (booking.paymentStatus === 'processed') {
-      booking.paymentStatus = 'refunded';
-    }
+    booking.paymentStatus = 'cancelled';
     await booking.save();
-
-    const payment = await Payment.findOne({ bookingId: booking._id });
-    if (payment) {
-      if (payment.status === 'pending') {
-        payment.status = 'canceled';
-      } else if (payment.status === 'succeeded') {
-        payment.status = 'refunded';
-      }
-      payment.updatedAt = new Date();
-      await payment.save();
-    }
 
     req.io?.to(`user:${booking.userId}`).emit('bookingStatusUpdated', {
       bookingId: booking._id,

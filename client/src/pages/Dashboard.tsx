@@ -3,9 +3,10 @@ import { motion } from "framer-motion";
 import {
     Car, Leaf, Wallet, Bell, Settings, LogOut,
     TrendingUp, Users, ArrowUp, MessageSquare, Navigation, Globe,
-    CheckCircle, Calendar, Zap, Star, MapPin, Search, Loader2
+    CheckCircle, Calendar, Zap, Star, MapPin, Search, Loader2, Menu
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Link, useSearchParams } from "react-router-dom";
 import api from "@/lib/api";
 import {
@@ -24,6 +25,8 @@ import AccountSettings from "./dashboard/AccountSettings";
 import DriverProfile from "./dashboard/DriverProfile";
 import RiderRatings from "./dashboard/RiderRatings";
 import SubscriptionPage from "./dashboard/SubscriptionPage";
+import RideHistory from "./dashboard/RideHistory";
+import RiderHistory from "./dashboard/RiderHistory";
 import NotificationsPanel from "@/components/NotificationsPanel";
 import { AnimatePresence } from "framer-motion";
 import RiderOverviewCompact from "./dashboard/RiderOverviewCompact";
@@ -39,12 +42,74 @@ const navItems = [
     { id: "rides", icon: Car, label: "My Rides" },
     { id: "community", icon: Users, label: "Community" },
     { id: "ratings", icon: Star, label: "Ratings" },
-    { id: "emissions", icon: Leaf, label: "Emissions" },
-    { id: "wallet", icon: Wallet, label: "Wallet" },
+    { id: "emissions", icon: Leaf, label: "Sustainability" },
+    { id: "wallet", icon: Wallet, label: "Fare Summary" },
     { id: "subscription", icon: Calendar, label: "Plans & Usage" },
     { id: "messages", icon: MessageSquare, label: "Messages" },
+    { id: "history", icon: Calendar, label: "Ride History" },
 ];
-const mobileNavItems = [...navItems, { id: "settings", icon: Settings, label: "Settings" }];
+const mobileNavItems = [
+    { id: "overview", icon: TrendingUp, label: "Home" },
+    { id: "find", icon: Search, label: "Find" },
+    { id: "rides", icon: Car, label: "Rides" },
+    { id: "messages", icon: MessageSquare, label: "Chat" },
+    { id: "settings", icon: Settings, label: "More" },
+];
+
+const RiderRightRail = ({
+    onNavigate,
+}: {
+    onNavigate: (tab: string) => void;
+}) => {
+    const quickActions = [
+        { id: "find", label: "Find Ride", icon: Search },
+        { id: "rides", label: "My Rides", icon: Car },
+        { id: "messages", label: "Messages", icon: MessageSquare },
+    ];
+
+    return (
+        <aside className="hidden xl:flex xl:h-full xl:min-w-[290px] xl:max-w-[290px] xl:flex-col xl:gap-4 xl:overflow-y-auto">
+            <div className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm">
+                <div className="mb-3 text-xs font-bold uppercase tracking-[0.24em] text-muted-foreground">Quick Actions</div>
+                <div className="space-y-2">
+                    {quickActions.map((action) => (
+                        <button
+                            key={action.id}
+                            onClick={() => onNavigate(action.id)}
+                            className="flex w-full items-center justify-between rounded-2xl border border-border/50 bg-background px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5"
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                    <action.icon className="h-4 w-4" />
+                                </div>
+                                <div>
+                                    <div className="text-sm font-semibold text-foreground">{action.label}</div>
+                                    <div className="text-xs text-muted-foreground">Open this section</div>
+                                </div>
+                            </div>
+                            <ArrowUp className="h-4 w-4 rotate-45 text-muted-foreground" />
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="rounded-2xl border border-border/60 bg-card p-5 shadow-sm">
+                <div className="mb-3 flex items-center gap-2">
+                    <Bell className="h-4 w-4 text-primary" />
+                    <div className="text-xs font-bold uppercase tracking-[0.24em] text-muted-foreground">Travel Tips</div>
+                </div>
+                <div className="space-y-3 text-sm text-muted-foreground">
+                    <div className="rounded-xl border border-border/50 bg-background px-4 py-3">
+                        Keep your pickup note clear so drivers can confirm faster.
+                    </div>
+                    <div className="rounded-xl border border-border/50 bg-background px-4 py-3">
+                        Share live tracking from My Rides once the trip starts for extra safety.
+                    </div>
+                </div>
+            </div>
+        </aside>
+    );
+};
 
 /* ──────────── Overview component (API-driven) ──────────── */
 const Overview = ({ user, onBookRide }: { user: any; onBookRide: () => void }) => {
@@ -238,7 +303,7 @@ const Overview = ({ user, onBookRide }: { user: any; onBookRide: () => void }) =
                     </div>
                     <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">2026</span>
                 </div>
-                <ResponsiveContainer width="100%" height={220}>
+                <ResponsiveContainer width="100%" height={170}>
                     <AreaChart data={rideHistory}>
                         <defs>
                             <linearGradient id="colorRides" x1="0" y1="0" x2="0" y2="1">
@@ -359,6 +424,7 @@ const Dashboard = () => {
     const [initialQuery, setInitialQuery] = useState("");
     const [user, setUser] = useState<any>(null);
     const [notificationsOpen, setNotificationsOpen] = useState(false);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     useEffect(() => {
         if (tabParam && tabParam !== activeTab) {
@@ -381,6 +447,7 @@ const Dashboard = () => {
 
     const handleTabChange = (tab: string) => {
         setActiveTab(tab);
+        setMobileMenuOpen(false);
         setSearchParams((prev) => {
             const next = new URLSearchParams(prev);
             next.set("tab", tab);
@@ -398,6 +465,7 @@ const Dashboard = () => {
             case "messages": return <Messages />;
             case "community": return <Community />;
             case "ratings": return <RiderRatings />;
+            case "history": return <RiderHistory />;
             case "settings": return <AccountSettings />;
             default:
                 if (activeTab.startsWith("profile:")) {
@@ -420,16 +488,16 @@ const Dashboard = () => {
         <div className="min-h-screen bg-muted/10 overflow-x-hidden">
             {/* Sidebar */}
             <aside className="fixed inset-y-0 left-0 z-40 hidden h-screen w-64 overflow-hidden border-r border-white/5 bg-[#0a0a0c] lg:flex lg:flex-col">
-                <div className="shrink-0 border-b border-white/5 px-5 py-5">
+                <div className="shrink-0 border-b border-white/5 px-4 py-4">
                     <Link to="/" className="flex items-center gap-3">
                         <BrandLogo dark textClassName="text-lg text-white" />
                     </Link>
                 </div>
 
                 {/* User info */}
-                <div className="shrink-0 border-b border-white/5 px-4 py-4">
-                    <div className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 p-3">
-                        <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-primary text-sm font-bold uppercase text-white shadow-inner">
+                <div className="shrink-0 border-b border-white/5 px-3 py-3">
+                    <div className="flex items-center gap-2.5 rounded-2xl border border-white/5 bg-white/5 p-2.5">
+                        <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-primary text-sm font-bold uppercase text-white shadow-inner">
                             {user?.avatar ? <img src={user.avatar} className="w-full h-full object-cover" /> : initials}
                         </div>
                         <div className="min-w-0">
@@ -441,31 +509,31 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                <nav className="custom-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-3">
+                <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
                     {navItems.map((item) => (
                         <button
                             key={item.id}
                             onClick={() => handleTabChange(item.id)}
-                            className={`group flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${activeTab === item.id
+                            className={`group flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-all ${activeTab === item.id
                                 ? "bg-primary text-white shadow-glow-primary"
                                 : "text-muted-foreground hover:bg-white/5 hover:text-white"
                                 }`}
                         >
-                            <item.icon className={`h-4 w-4 shrink-0 transition-transform group-hover:scale-110 ${activeTab === item.id ? "text-white" : "text-muted-foreground/60"}`} />
+                            <item.icon className={`h-3.5 w-3.5 shrink-0 transition-transform group-hover:scale-110 ${activeTab === item.id ? "text-white" : "text-muted-foreground/60"}`} />
                             {item.label}
                         </button>
                     ))}
                 </nav>
 
-                <div className="shrink-0 space-y-1 border-t border-white/5 p-3">
+                <div className="shrink-0 space-y-0.5 border-t border-white/5 p-2">
                     <button
                         onClick={() => handleTabChange('settings')}
-                        className={`flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${activeTab === 'settings' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-white/5 hover:text-white'}`}
+                        className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-all ${activeTab === 'settings' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-white/5 hover:text-white'}`}
                     >
-                        <Settings className="h-4 w-4" /> Settings
+                        <Settings className="h-3.5 w-3.5" /> Settings
                     </button>
-                    <button onClick={handleLogout} className="flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm font-medium text-red-400/70 transition-all hover:bg-red-500/10 hover:text-red-400">
-                        <LogOut className="h-4 w-4" /> Log Out
+                    <button onClick={handleLogout} className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] font-medium text-red-400/70 transition-all hover:bg-red-500/10 hover:text-red-400">
+                        <LogOut className="h-3.5 w-3.5" /> Log Out
                     </button>
                 </div>
             </aside>
@@ -477,7 +545,7 @@ const Dashboard = () => {
                     <button
                         key={item.id}
                         onClick={() => handleTabChange(item.id)}
-                        className={`flex shrink-0 flex-col items-center gap-1 min-w-[74px] px-3 py-2 rounded-xl transition-all ${activeTab === item.id ? "text-primary bg-primary/10" : "text-muted-foreground"}`}
+                        className={`flex shrink-0 flex-col items-center gap-1 min-w-[68px] px-2.5 py-2 rounded-xl transition-all ${activeTab === item.id ? "text-primary bg-primary/10" : "text-muted-foreground"}`}
                     >
                         <item.icon className="w-4 h-4" />
                         <span className="text-[10px] font-bold leading-tight text-center">{item.label}</span>
@@ -487,7 +555,7 @@ const Dashboard = () => {
             </div>
 
             {/* Main */}
-            <main className="min-h-screen pb-28 lg:ml-64 lg:h-screen lg:overflow-hidden lg:pb-0">
+            <main className="min-h-screen pb-28 lg:ml-64 lg:pb-0">
                 {/* Header */}
                 <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-border bg-background/80 px-4 py-3 backdrop-blur-xl sm:px-6">
                     <div className="min-w-0">
@@ -496,6 +564,70 @@ const Dashboard = () => {
                         </h1>
                     </div>
                     <div className="flex items-center gap-3">
+                        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+                            <SheetTrigger asChild>
+                                <button
+                                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-card transition-colors hover:border-primary/50 lg:hidden"
+                                    aria-label="Open menu"
+                                >
+                                    <Menu className="h-4 w-4 text-muted-foreground" />
+                                </button>
+                            </SheetTrigger>
+                            <SheetContent side="left" className="w-[86vw] max-w-[320px] border-r border-border bg-background p-0">
+                                <SheetHeader className="border-b border-border px-5 py-4 text-left">
+                                    <SheetTitle className="text-left">
+                                        <BrandLogo textClassName="text-base text-foreground" />
+                                    </SheetTitle>
+                                </SheetHeader>
+                                <div className="flex h-full flex-col">
+                                    <div className="border-b border-border px-5 py-4">
+                                        <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card p-3">
+                                            <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-primary text-sm font-bold uppercase text-white">
+                                                {user?.avatar ? <img src={user.avatar} className="h-full w-full object-cover" /> : initials}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="truncate text-sm font-semibold text-foreground">{user?.name || "Rider"}</div>
+                                                <div className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${user?.verified ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"}`}>
+                                                    <CheckCircle className="h-3 w-3" />
+                                                    {user?.verified ? "Verified" : "Not Verified"}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+                                        <div className="mb-3 px-2 text-[11px] font-bold uppercase tracking-[0.24em] text-muted-foreground">All Pages</div>
+                                        <div className="space-y-1.5">
+                                            {navItems.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    onClick={() => handleTabChange(item.id)}
+                                                    className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium transition-colors ${activeTab === item.id ? "bg-primary text-white" : "text-foreground hover:bg-primary/5"}`}
+                                                >
+                                                    <item.icon className={`h-4 w-4 ${activeTab === item.id ? "text-white" : "text-primary"}`} />
+                                                    {item.label}
+                                                </button>
+                                            ))}
+                                            <button
+                                                onClick={() => handleTabChange("settings")}
+                                                className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium transition-colors ${activeTab === "settings" ? "bg-primary text-white" : "text-foreground hover:bg-primary/5"}`}
+                                            >
+                                                <Settings className={`h-4 w-4 ${activeTab === "settings" ? "text-white" : "text-primary"}`} />
+                                                Settings
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="border-t border-border p-3">
+                                        <button
+                                            onClick={handleLogout}
+                                            className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium text-red-500 transition-colors hover:bg-red-500/10"
+                                        >
+                                            <LogOut className="h-4 w-4" />
+                                            Log Out
+                                        </button>
+                                    </div>
+                                </div>
+                            </SheetContent>
+                        </Sheet>
                         <div className="relative">
                             <button
                                 onClick={() => setNotificationsOpen(!notificationsOpen)}
@@ -514,16 +646,19 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                <div className="mx-auto max-w-6xl overflow-hidden p-4 sm:p-5 lg:h-[calc(100vh-65px)] lg:p-6 lg:pt-5">
-                    <motion.div
-                        key={activeTab}
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.3 }}
-                        className="h-full overflow-hidden"
-                    >
-                        {renderContent()}
-                    </motion.div>
+                <div className="mx-auto max-w-[1720px] p-4 sm:p-5 lg:p-6 lg:pt-5">
+                    <div className={activeTab === "overview" ? "xl:grid xl:grid-cols-[minmax(0,1fr)_290px] xl:gap-6" : ""}>
+                        <motion.div
+                            key={activeTab}
+                            initial={{ opacity: 0, x: 10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="min-h-0"
+                        >
+                            {renderContent()}
+                        </motion.div>
+                        {activeTab === "overview" && <RiderRightRail onNavigate={handleTabChange} />}
+                    </div>
                 </div>
             </main>
         </div>

@@ -4,12 +4,13 @@ import { motion } from "framer-motion";
 import {
   CheckCircle, XCircle, User, MessageSquare,
   Loader2, Navigation, Clock, DollarSign,
-  Users, MapPin, AlertCircle, Star,
+  Users, MapPin, AlertCircle, Star, PlusCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import api from "../../lib/api";
 import { RateRideModal } from "@/components/RateRideModal";
+import { useNavigate } from "react-router-dom";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                           */
@@ -78,10 +79,22 @@ function fmtDate(raw: string | undefined) {
 
 function shortAddr(point: any, fallback = "Unknown") {
   if (!point) return fallback;
+  if (typeof point === "string" && point.trim()) return point.split(",")[0];
+  if (typeof point?.originAddress === "string" && point.originAddress) return point.originAddress.split(",")[0];
+  if (typeof point?.destinationAddress === "string" && point.destinationAddress) return point.destinationAddress.split(",")[0];
   if (typeof point?.address === "string" && point.address) return point.address.split(",")[0];
   if (typeof point?.location?.address === "string" && point.location.address) return point.location.address.split(",")[0];
+  if (typeof point?.point?.address === "string" && point.point.address) return point.point.address.split(",")[0];
+  if (typeof point?.label === "string" && point.label) return point.label.split(",")[0];
+  if (typeof point?.name === "string" && point.name) return point.name.split(",")[0];
+  if (typeof point?.origin?.address === "string" && point.origin.address) return point.origin.address.split(",")[0];
+  if (typeof point?.destination?.address === "string" && point.destination.address) return point.destination.address.split(",")[0];
   if (Array.isArray(point?.coordinates) && point.coordinates.length >= 2) {
     const [lng, lat] = point.coordinates;
+    return `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`;
+  }
+  if (Array.isArray(point?.point?.coordinates) && point.point.coordinates.length >= 2) {
+    const [lng, lat] = point.point.coordinates;
     return `${Number(lat).toFixed(4)}, ${Number(lng).toFixed(4)}`;
   }
   return fallback;
@@ -313,7 +326,7 @@ function LiveRideTracker({
 /*  RideRequestCard — own component for hooks                          */
 /* ------------------------------------------------------------------ */
 function RideRequestCard({
-  req, actionId, counterFare, onCounterChange, onAccept, onReject, onCounter,
+  req, actionId, counterFare, onCounterChange, onAccept, onReject, onCounter, onCreateOffer,
 }: {
   req: any;
   actionId: string | null;
@@ -322,6 +335,7 @@ function RideRequestCard({
   onAccept: () => void;
   onReject: () => void;
   onCounter: () => void;
+  onCreateOffer: () => void;
 }) {
   // Resolve addresses from origin/destination GeoJSON on the request itself, fallback to string address
   const originLabel =
@@ -409,9 +423,19 @@ function RideRequestCard({
         </Button>
       </div>
       {!hasCompatibleOffer && (
-        <p className="mt-2 text-[11px] font-medium text-amber-600">
-          This request cannot be accepted because none of your offers match its route and timing.
-        </p>
+        <div className="mt-2 space-y-2">
+          <p className="text-[11px] font-medium text-amber-600">
+            Create a matching offer first. This rider request cannot be accepted until you have a relevant route and time.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onCreateOffer}
+            className="w-full h-9 text-xs rounded-xl border-emerald-200 text-emerald-600 hover:bg-emerald-50"
+          >
+            <PlusCircle className="w-3.5 h-3.5 mr-1.5" /> Create Matching Offer
+          </Button>
+        </div>
       )}
     </div>
   );
@@ -421,9 +445,11 @@ function RideRequestCard({
 /*  Main Page                                                           */
 /* ------------------------------------------------------------------ */
 const DriverBookings = () => {
+  const navigate = useNavigate();
   const [bookings, setBookings]         = useState<any[]>([]);
   const [rideRequests, setRideRequests] = useState<any[]>([]);
   const [driverOffers, setDriverOffers] = useState<any[]>([]);
+  const [requestsMeta, setRequestsMeta] = useState<{ limit: number; scope: string; driverAreas: string[]; needsCity?: boolean } | null>(null);
   const [loading, setLoading]           = useState(true);
   const [requestsLoading, setRequestsLoading] = useState(true);
   const [updatingId, setUpdatingId]     = useState<string | null>(null);
@@ -460,6 +486,12 @@ const DriverBookings = () => {
       // ✓ correct — backend: GET /api/rides/requests/driver/open
       const res = await api.get("/rides/requests/driver/open");
       setRideRequests(res.data?.data?.requests || []);
+      setRequestsMeta({
+        limit: Number(res.data?.data?.limit || 20),
+        scope: String(res.data?.data?.scope || "Showing top 20 rider requests from your area"),
+        driverAreas: Array.isArray(res.data?.data?.driverAreas) ? res.data.data.driverAreas : [],
+        needsCity: Boolean(res.data?.data?.needsCity),
+      });
     } catch (err) {
       console.error("Failed to fetch driver requests:", err);
     } finally {
@@ -575,6 +607,20 @@ const DriverBookings = () => {
     }
   };
 
+  const handleCreateMatchingOffer = (request: any) => {
+    const offerDraft = {
+      origin: request.originAddress || "",
+      destination: request.destinationAddress || "",
+      departureDate: request.earliestDeparture ? new Date(request.earliestDeparture).toISOString().slice(0, 10) : "",
+      earliestTime: request.earliestDeparture ? new Date(request.earliestDeparture).toTimeString().slice(0, 5) : "08:00",
+      latestTime: request.latestDeparture ? new Date(request.latestDeparture).toTimeString().slice(0, 5) : "08:30",
+      seatsTotal: Number(request.seatsNeeded || 1),
+      pricePerSeat: request.maxPricePerSeat ? String(request.maxPricePerSeat) : "",
+    };
+    localStorage.setItem("carpconnect_offer_draft", JSON.stringify(offerDraft));
+    navigate("/driver-dashboard?tab=offer");
+  };
+
   /* ---- booking status ---- */
   const handleStatus = async (id: string, newStatus: string) => {
     setUpdatingId(id);
@@ -582,6 +628,9 @@ const DriverBookings = () => {
       if (newStatus === "confirm") {
         await api.put(`/bookings/${id}/confirm`);
         setBookings(prev => prev.map(b => b._id === id ? { ...b, status: "confirmed" } : b));
+      } else if (newStatus === "cancelled") {
+        await api.put(`/bookings/${id}/reject`);
+        setBookings(prev => prev.map(b => b._id === id ? { ...b, status: "cancelled" } : b));
       } else if (newStatus === "arrived") {
         await api.patch(`/bookings/${id}/arrived`);
         setBookings(prev => prev.map(b => b._id === id ? { ...b, arrivedAt: new Date().toISOString() } : b));
@@ -680,6 +729,14 @@ const DriverBookings = () => {
       <div className="bg-white rounded-2xl border border-gray-200 p-4">
         <div className="mb-3">
           <h3 className="text-base font-semibold text-gray-900">Open Rider Requests</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            {requestsMeta?.scope || "Showing top 20 rider requests from your area."}
+          </p>
+          {requestsMeta?.needsCity && (
+            <p className="mt-1 text-xs text-amber-600">
+              Add your city in Settings for better local request matching.
+            </p>
+          )}
         </div>
 
         {requestsLoading ? (
@@ -689,7 +746,9 @@ const DriverBookings = () => {
         ) : rideRequests.filter(r => r.status === 'open').length === 0 ? (
           <div className="text-center py-8">
             <div className="text-3xl mb-2">📭</div>
-            <p className="text-sm text-gray-400">No open rider requests right now.</p>
+            <p className="text-sm text-gray-400">
+              {requestsMeta?.needsCity ? "Add your city in Settings to unlock local open requests." : "No open rider requests right now."}
+            </p>
           </div>
         ) : (
           <div className="grid gap-3 xl:grid-cols-2">
@@ -703,6 +762,7 @@ const DriverBookings = () => {
                 onAccept={() => handleAcceptRequest(req)}
                 onReject={() => handleRejectRequest(req._id)}
                 onCounter={() => handleCounterRequest(req)}
+                onCreateOffer={() => handleCreateMatchingOffer(req)}
               />
             ))}
           </div>
@@ -740,10 +800,10 @@ const DriverBookings = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {bookingGroupEntries.map(([offerId, group]) => {
+            {bookingGroupEntries.map(([offerId, group]) => {
             const offer = group.offer;
             const routeLabel = offer
-              ? `${shortAddr(offer.origin, "Origin")} -> ${shortAddr(offer.destination, "Destination")}`
+              ? `${shortAddr(offer.originAddress || offer.origin?.address || offer.origin, "Origin")} -> ${shortAddr(offer.destinationAddress || offer.destination?.address || offer.destination, "Destination")}`
               : "Offer details unavailable";
             const activeRiders = group.bookings.filter((booking: any) => ["confirmed", "picked_up", "live"].includes(booking.status)).length;
             const seatDemand = group.bookings.reduce((sum: number, booking: any) => sum + Number(booking.seatCount || booking.seatsRequested || booking.seats || 1), 0);

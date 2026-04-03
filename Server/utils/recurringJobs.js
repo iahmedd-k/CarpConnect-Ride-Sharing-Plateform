@@ -127,6 +127,8 @@ const startRecurringJobs = () => {
 };
 
 module.exports = {
+  materializeOfferOccurrence,
+  materializeRequestOccurrence,
   runRecurringMaterialization,
   startRecurringJobs
 };

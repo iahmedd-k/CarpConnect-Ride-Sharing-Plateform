@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+﻿import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import LeafletMap from "@/components/LeafletMap";
-import { StripeCheckoutModal } from "@/components/StripeCheckoutModal";
 import {
     fetchAddressSuggestions,
     resolveAddressCoordinates,
@@ -57,13 +56,12 @@ const shortAddress = (value: any, fallback = "—") => {
 // ─────────────────────── Seat Book Modal ────────────────────────────────────────
 interface SeatBookModalProps {
     ride: RideResult;
-    onConfirm: (seats: number, paymentMethod: "cash" | "stripe") => void;
+    onConfirm: (seats: number) => void;
     onClose: () => void;
     loading: boolean;
 }
 function SeatBookModal({ ride, onConfirm, onClose, loading }: SeatBookModalProps) {
     const [seats, setSeats] = useState(1);
-    const [paymentMethod, setPaymentMethod] = useState<"cash" | "stripe">("cash");
     const max = Math.min(ride.seatsAvailable, 8);
     const total = ride.pricePerSeat * seats;
 
@@ -203,43 +201,24 @@ function SeatBookModal({ ride, onConfirm, onClose, loading }: SeatBookModalProps
                         )}
                     </AnimatePresence>
 
-                    <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block">
-                            Payment method
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setPaymentMethod("cash")}
-                                className={`h-11 rounded-xl border text-xs font-bold transition-all ${paymentMethod === "cash"
-                                    ? "bg-emerald-500/10 border-emerald-500 text-emerald-600"
-                                    : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/40"
-                                    }`}
-                            >
-                                Cash / Direct
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setPaymentMethod("stripe")}
-                                className={`h-11 rounded-xl border text-xs font-bold transition-all ${paymentMethod === "stripe"
-                                    ? "bg-primary/10 border-primary text-primary"
-                                    : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/40"
-                                    }`}
-                            >
-                                Online
-                            </button>
+                    <div className="rounded-2xl border border-border/40 bg-muted/20 px-4 py-3">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Settlement
                         </div>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                            CarpConnect only shows the split fare. Riders and drivers settle the ride amount directly with each other.
+                        </p>
                     </div>
 
                     <Button
-                        onClick={() => onConfirm(seats, paymentMethod)}
+                        onClick={() => onConfirm(seats)}
                         disabled={loading}
                         className="w-full h-13 py-4 bg-gradient-primary text-white rounded-2xl font-bold text-sm shadow-glow hover:opacity-90 transition-opacity"
                         id="confirm-book-btn"
                     >
                         {loading
                             ? <span className="flex items-center gap-2 justify-center"><Loader2 className="w-4 h-4 animate-spin" /> Booking...</span>
-                            : <span className="flex items-center gap-2 justify-center"><Wallet className="w-4 h-4" /> Confirm {seats} seat{seats > 1 ? 's' : ''} ({paymentMethod === "cash" ? "Cash" : "Online"}) · {fmt2(total)}</span>
+                            : <span className="flex items-center gap-2 justify-center"><Wallet className="w-4 h-4" /> Confirm {seats} seat{seats > 1 ? 's' : ''} · {fmt2(total)}</span>
                         }
                     </Button>
                 </div>
@@ -444,9 +423,6 @@ const FindRide = ({
 
     // ── Booking
     const [bookingId, setBookingId] = useState<string | null>(null);
-    const [clientSecret, setClientSecret] = useState<string | null>(null);
-    const [paymentId, setPaymentId] = useState<string | null>(null);
-    const [paymentAmount, setPaymentAmount] = useState(0);
     const [bookingLoading, setBookingLoading] = useState(false);
     const [nearbyLoading, setNearbyLoading] = useState(false);
     const [requestLoading, setRequestLoading] = useState(false);
@@ -775,10 +751,7 @@ const FindRide = ({
     const respondCounter = async (requestId: string, action: 'accept' | 'decline') => {
         setRespondingCounterId(requestId);
         try {
-            await api.post(`/rides/requests/${requestId}/counter/respond`, {
-                action,
-                paymentMethod: "cash",
-            });
+            await api.post(`/rides/requests/${requestId}/counter/respond`, { action });
             if (action === 'accept') {
                 toast.success('Counter offer accepted and booking confirmed. Opening My Rides.');
                 navigate("/dashboard?tab=rides");
@@ -937,7 +910,7 @@ const FindRide = ({
     // ── Book a ride directly by offerId ──────────────────────────────────────
     const [seatBookRide, setSeatBookRide] = useState<RideResult | null>(null);
 
-    const executeBooking = async (seatsNeeded: number, paymentMethod: "cash" | "stripe") => {
+    const executeBooking = async (seatsNeeded: number) => {
         if (!seatBookRide) return;
         setBookingLoading(true);
         setBookingId(seatBookRide._id);
@@ -947,11 +920,9 @@ const FindRide = ({
             const res = await api.post("/rides/book-direct", {
                 offerId: seatBookRide._id,
                 seatsNeeded,
-                paymentMethod,
             });
 
             createdBookingId = res.data?.data?.booking?._id || res.data?.data?.bookingId;
-            const totalFare = res.data?.data?.totalFare || seatBookRide.pricePerSeat * seatsNeeded;
             if (!createdBookingId) throw new Error("Booking ID missing from response.");
 
             setBookedIds(prev => ({ ...prev, [seatBookRide._id]: true }));
@@ -960,20 +931,8 @@ const FindRide = ({
                     ? { ...r, seatsAvailable: Math.max(0, r.seatsAvailable - seatsNeeded) }
                     : r
             ));
-            if (paymentMethod === "stripe") {
-                const paymentRes = await api.post("/payments/split", { bookingId: createdBookingId });
-                const nextClientSecret = paymentRes.data?.data?.clientSecret;
-                const nextPaymentId = paymentRes.data?.data?.paymentId;
-                if (!nextClientSecret || !nextPaymentId) throw new Error("Payment setup failed.");
-
-                setClientSecret(nextClientSecret);
-                setPaymentId(nextPaymentId);
-                setPaymentAmount(totalFare);
-                toast.success("Seats reserved. Complete payment to confirm your ride.");
-            } else {
-                toast.success("Booking confirmed with cash/direct payment. Opening My Rides.");
-                navigate("/dashboard?tab=rides");
-            }
+            toast.success("Booking request saved. Riders and drivers settle the fare directly.");
+            navigate("/dashboard?tab=rides");
             setSeatBookRide(null);
         } catch (err: any) {
             const message = err?.response?.data?.message || err?.message || "Booking failed. Please try again.";
@@ -984,7 +943,7 @@ const FindRide = ({
             } else if (createdBookingId) {
                 setSeatBookRide(null);
                 setBookedIds(prev => ({ ...prev, [seatBookRide._id]: true }));
-                toast.warning("Seat reserved, but payment setup still needs attention. Opening My Rides.");
+                toast.warning("Seat reserved. Opening My Rides.");
                 navigate("/dashboard?tab=rides");
             } else {
                 toast.error(message);
@@ -1076,12 +1035,6 @@ const FindRide = ({
         } finally {
             setRequestLoading(false);
         }
-    };
-
-    const handlePaymentSuccess = () => {
-        setClientSecret(null);
-        toast.success("Payment successful! Ride booked. 🎉");
-        navigate("/dashboard?tab=rides");
     };
 
     const requestSummary = {
@@ -2012,19 +1965,6 @@ const FindRide = ({
                 </div>
             </div>}
 
-            {/* ── Stripe payment modal ─────────────────────────────────────── */}
-            {clientSecret && (
-                <StripeCheckoutModal
-                    clientSecret={clientSecret}
-                    paymentId={paymentId}
-                    amount={paymentAmount}
-                    onPaymentSuccess={handlePaymentSuccess}
-                    onClose={() => {
-                        setClientSecret(null);
-                        setPaymentId(null);
-                    }}
-                />
-            )}
         </div>
     );
 };

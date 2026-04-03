@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const asyncHandler = require('express-async-handler');
 const Review = require('../models/Review');
 const Booking = require('../models/Booking');
+const RideOffer = require('../models/RideOffer');
 
 // @desc    Register a new user
 // @route   POST /api/auth/signup
@@ -66,19 +67,38 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 // @desc    Get user profile
-// @route   GET /api/users/profile
+// @route   GET /api/users/:id/profile
 // @access  Private
 const getUserProfile = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id).select('-password');
+  const targetUserId = req.params.id || req.user?._id;
+  const user = await User.findById(targetUserId).select('-password');
   
   if (user) {
-    res.json({
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      verified: user.verified,
-      joinedAt: user.joinedAt
+    const recentRides = await RideOffer.find({ driverId: user._id })
+      .sort({ departureTime: -1 })
+      .limit(6)
+      .select('origin destination originAddress destinationAddress departureTime status estimatedDistanceKm estimatedDurationMin routeGeoJson');
+
+    res.status(200).json({
+      success: true,
+      data: {
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          phone: user.phone || '',
+          verified: Boolean(user.verified),
+          joinedAt: user.joinedAt || user.createdAt || null,
+          profilePhoto: user.profilePhoto || '',
+          avatar: user.avatar || '',
+          ratings: user.ratings || { average: 0, count: 0, recent: [] },
+          vehicle: user.vehicle || null,
+          totalCompletedRides: Number(user.totalCompletedRides || 0),
+          totalCo2SavedKg: Number(user.totalCo2SavedKg || 0),
+        },
+        recentRides
+      }
     });
   } else {
     res.status(404);

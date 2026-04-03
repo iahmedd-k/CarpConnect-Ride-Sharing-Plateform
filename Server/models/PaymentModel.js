@@ -75,13 +75,12 @@ paymentSchema.index({ createdAt: -1 });
 
 // Virtual field for platform fee percentage
 paymentSchema.virtual('platformFeePercentage').get(function() {
-  if (this.amount === 0) return 0;
-  return parseFloat((this.platformFee / this.amount * 100).toFixed(2));
+  return 0;
 });
 
 // Static method to calculate platform fee
 paymentSchema.statics.calculatePlatformFee = function(amount) {
-  return amount * 0.1; // 10% platform fee
+  return 0;
 };
 
 // Method to create a new payment
@@ -89,8 +88,8 @@ paymentSchema.statics.createPayment = async function(booking, rider, amount, opt
   const { paymentMethod = 'cash' } = options;
   
   // Calculate platform fee
-  const platformFee = this.calculatePlatformFee(amount);
-  const driverAmount = amount - platformFee;
+  const platformFee = 0;
+  const driverAmount = amount;
   
   // Create payment record
   return this.create({

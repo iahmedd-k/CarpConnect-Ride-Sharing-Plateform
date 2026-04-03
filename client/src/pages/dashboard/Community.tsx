@@ -180,8 +180,10 @@ const Community = () => {
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     <div className="font-bold text-foreground truncate">{driver.name}</div>
-                                    <div className="flex items-center gap-1 text-[10px] text-emerald font-bold uppercase tracking-widest mt-0.5">
-                                        <Shield className="w-3 h-3" /> Verified
+                                    <div className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest mt-0.5 ${
+                                        driver.verified ? "text-emerald" : "text-amber-500"
+                                    }`}>
+                                        <Shield className="w-3 h-3" /> {driver.verified ? "Verified" : "Not Verified"}
                                     </div>
                                 </div>
                             </div>
