@@ -17,6 +17,7 @@ import { currentPlanFromStorage, hasPlanAtLeast } from "@/lib/planAccess";
 import { normalizePlanId } from "@/lib/plans";
 import LeafletMap from "@/components/LeafletMap";
 import LiveTrackingMap from "@/components/LiveTrackingMap";
+import { buildTrackingUrl } from "@/lib/trackingUrl";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                           */
@@ -182,6 +183,15 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
   const driverPhone       = currentBooking?.driver?.phone || offer?.driver?.phone || null;
   const seatCount         = currentBooking?.seatsRequested || currentBooking?.seatCount || 1;
   const fareAmount        = currentBooking?.fare?.totalAmount || 0;
+
+  const shareTrackingUrl = async () => {
+    if (!rideId) {
+      toast.error("Tracking link is not ready yet.");
+      return;
+    }
+    await navigator.clipboard.writeText(buildTrackingUrl(String(rideId)));
+    toast.success("Live tracking link copied.");
+  };
 
   /* Socket setup */
   useEffect(() => {
@@ -739,6 +749,16 @@ const MyRides = () => {
     }
   };
 
+  const shareTrackingUrl = async (booking: any) => {
+    const rideId = booking?.offer?._id || booking?.offerId || booking?.matchId;
+    if (!rideId) {
+      toast.error("Tracking link is not ready yet.");
+      return;
+    }
+    await navigator.clipboard.writeText(buildTrackingUrl(String(rideId)));
+    toast.success("Live tracking link copied.");
+  };
+
   const handleCancel = async (id: string) => {
     try {
       await api.delete(`/bookings/${id}`);
@@ -1071,7 +1091,7 @@ const MyRides = () => {
                                     toast.error("Tracking link is not ready yet.");
                                     return;
                                   }
-                                  await navigator.clipboard.writeText(`${window.location.origin}/track/${rideId}`);
+                                  await navigator.clipboard.writeText(buildTrackingUrl(rideId));
                                   toast.success("Live tracking link copied.");
                                 }}
                                 title="Share Live Tracking"
@@ -1177,15 +1197,6 @@ const MyRides = () => {
 };
 
 export default MyRides;
-  const shareTrackingUrl = async () => {
-    const rideId = offer?._id || booking?.offerId || booking?.matchId;
-    if (!rideId) {
-      toast.error("Tracking link is not ready yet.");
-      return;
-    }
-    await navigator.clipboard.writeText(`${window.location.origin}/track/${rideId}`);
-    toast.success("Live tracking link copied.");
-  };
 
 
 

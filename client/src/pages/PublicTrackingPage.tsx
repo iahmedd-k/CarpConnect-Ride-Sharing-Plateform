@@ -17,6 +17,7 @@ import LiveTrackingMap from "@/components/LiveTrackingMap";
 import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { buildTrackingUrl } from "@/lib/trackingUrl";
 
 const shortAddress = (value?: string) => (value ? value.split(",")[0] : "—");
 
@@ -84,7 +85,7 @@ export default function PublicTrackingPage() {
   const riders: PublicRider[] = Array.isArray(ride?.riders) ? ride.riders : [];
 
   const handleShare = async () => {
-    const url = `${window.location.origin}/track/${rideId}`;
+    const url = buildTrackingUrl(rideId);
     await navigator.clipboard.writeText(url);
     toast.success("Tracking link copied.");
   };
