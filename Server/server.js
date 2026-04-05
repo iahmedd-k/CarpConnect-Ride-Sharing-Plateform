@@ -268,7 +268,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options('/*', cors(corsOptions));
 
 // Import routes
 const authRoutes = require('./routes/Authroutes');
