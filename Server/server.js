@@ -55,6 +55,7 @@ const io = new Server(server, {
     credentials: true
   }
 });
+
 const etaAnnouncementCache = new Map();
 
 const estimateEtaMinutes = (from, to, speedKmh = 35) => {
@@ -64,7 +65,8 @@ const estimateEtaMinutes = (from, to, speedKmh = 35) => {
   const R = 6371;
   const dLat = ((toLat - fromLat) * Math.PI) / 180;
   const dLng = ((toLng - fromLng) * Math.PI) / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
+  const a =
+    Math.sin(dLat / 2) ** 2 +
     Math.cos((fromLat * Math.PI) / 180) *
     Math.cos((toLat * Math.PI) / 180) *
     Math.sin(dLng / 2) ** 2;
@@ -75,10 +77,7 @@ const estimateEtaMinutes = (from, to, speedKmh = 35) => {
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake?.auth?.token;
-    if (!token) {
-      return next();
-    }
-
+    if (!token) return next();
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id).select('_id name role');
     socket.user = user || null;
@@ -135,6 +134,7 @@ io.on('connection', (socket) => {
       if (!existingJoinMessage) {
         await createSystemChatMessage(context.rideId, joinMessage, io);
       }
+
       callback?.({ ok: true, rideId: context.rideId, isLocked: Boolean(context.room?.isLocked) });
     } catch (error) {
       console.error('join:chat error', error);
@@ -188,9 +188,7 @@ io.on('connection', (socket) => {
       timestamp: timestamp || new Date().toISOString()
     };
 
-    io.to(`ride:${rideId}`).emit('driverLocationUpdate', {
-      ...payload
-    });
+    io.to(`ride:${rideId}`).emit('driverLocationUpdate', { ...payload });
 
     (async () => {
       try {
@@ -201,10 +199,12 @@ io.on('connection', (socket) => {
 
         const routeCoordinates = match?.optimizedRoute?.geometry?.coordinates;
         const distanceFromRoute = calculatePointToRouteDistance(routeCoordinates, [Number(longitude), Number(latitude)]);
-        const destinationCoordinates = Array.isArray(routeCoordinates) && routeCoordinates.length
-          ? routeCoordinates[routeCoordinates.length - 1]
-          : null;
+        const destinationCoordinates =
+          Array.isArray(routeCoordinates) && routeCoordinates.length
+            ? routeCoordinates[routeCoordinates.length - 1]
+            : null;
         const etaMinutes = estimateEtaMinutes([Number(longitude), Number(latitude)], destinationCoordinates);
+
         if (Number.isFinite(etaMinutes) && etaMinutes <= 30) {
           const previousEta = etaAnnouncementCache.get(String(rideId));
           if (previousEta !== etaMinutes) {
@@ -212,6 +212,7 @@ io.on('connection', (socket) => {
             await createSystemChatMessage(String(rideId), `Driver is ${etaMinutes} mins away`, io);
           }
         }
+
         if (!Number.isFinite(distanceFromRoute) || distanceFromRoute <= 600) return;
 
         const alertPayload = {
@@ -224,6 +225,7 @@ io.on('connection', (socket) => {
         };
 
         io.to(`ride:${rideId}`).emit('routeDeviationAlert', alertPayload);
+
         if (Array.isArray(match?.riderIds)) {
           match.riderIds.forEach(async (riderId) => {
             io.to(`user:${riderId}`).emit('routeDeviationAlert', alertPayload);
@@ -253,22 +255,19 @@ app.use((req, res, next) => {
   req.io = io;
   next();
 });
+
 // Middleware
 app.use(express.json());
+
 const corsOptions = {
-  origin(origin, callback) {
-    if (isOriginAllowed(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
-  },
+  origin: true, // ✅ Allow all origins for now
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
-app.options(cors(corsOptions));
+app.options('/{*path}', cors(corsOptions)); // ✅ Fixed for path-to-regexp v8+
 
 // Import routes
 const authRoutes = require('./routes/Authroutes');
@@ -284,7 +283,7 @@ const rideRequestRoutes = require('./routes/RideRequestroutes');
 const ridesRoutes = require('./routes/RidesRoutes');
 const usersRoutes = require('./routes/UsersRoutes');
 
-// Add routes
+// Routes
 app.get('/api/health', (req, res) => {
   res.status(200).json({ success: true, message: 'API is running' });
 });
@@ -301,11 +300,10 @@ app.use('/api/rides/requests', rideRequestRoutes);
 app.use('/api/rides', ridesRoutes);
 app.use('/api/users', usersRoutes);
 
-// Error handler
+// Global error handler
 app.use((err, req, res, next) => {
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
-  res.status(statusCode);
-  res.json({
+  res.status(statusCode).json({
     message: err.message,
     stack: process.env.NODE_ENV === 'production' ? null : err.stack
   });
