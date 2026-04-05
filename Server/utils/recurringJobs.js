@@ -4,6 +4,7 @@ const {
   shouldOccurOnDate,
   buildOccurrenceDate
 } = require('./recurring');
+const RECURRING_SYNC_LABEL = 'Recurring scheduler synced successfully';
 
 const startOfDay = (date) => {
   const next = new Date(date);
@@ -114,7 +115,7 @@ const startRecurringJobs = () => {
       const result = await runRecurringMaterialization({ daysAhead: 2 });
       if (result.createdOffers || result.createdRequests) {
         console.log(
-          `Recurring materialization created ${result.createdOffers} offers and ${result.createdRequests} requests`
+          `${RECURRING_SYNC_LABEL}: created ${result.createdOffers} future offer(s) and ${result.createdRequests} future request(s).`
         );
       }
     } catch (error) {

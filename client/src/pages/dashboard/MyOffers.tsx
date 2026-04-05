@@ -1,5 +1,6 @@
-import { forwardRef, useState, useEffect } from "react";
+import { forwardRef, useState, useEffect, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import debounce from "lodash/debounce";
 import {
   Car,
   Clock,
@@ -18,6 +19,9 @@ import {
   Hash,
   RefreshCw,
 } from "lucide-react";
+import { DateField } from "@/components/DateField";
+import { TimeField } from "@/components/TimeField";
+import { fetchAddressSuggestions, resolveAddressCoordinates } from "@/lib/addressAutocomplete";
 import api from "../../lib/api";
 import { normalizeOfferStatus, offerStatusLabel } from "@/lib/rideStatus";
 
@@ -81,6 +85,14 @@ interface OfferBookingSummary {
   confirmedRiders: number;
 }
 
+const ACTIVE_BOOKING_STATUSES = ["confirmed", "picked_up", "live"];
+
+const getOfferSeatsTotal = (offer: Offer, summary?: OfferBookingSummary) =>
+  Number(offer.seatsTotal || Number(offer.seatsAvailable || 0) + Number(summary?.bookedSeats || 0));
+
+const getOfferSeatsRemaining = (offer: Offer, summary?: OfferBookingSummary) =>
+  Math.max(0, getOfferSeatsTotal(offer, summary) - Number(summary?.bookedSeats || 0));
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
@@ -135,16 +147,81 @@ function coordsToLabel(coords: [number, number] | undefined): string {
   const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
   return geocodeCache[key] || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
 }
+function resolveBookingStopLabel(
+  booking: any,
+  kind: "pickup" | "dropoff",
+  coords?: [number, number] | undefined
+): string {
+  const requestAddress = kind === "pickup"
+    ? booking?.request?.originAddress
+    : booking?.request?.destinationAddress;
+  if (typeof requestAddress === "string" && requestAddress.trim()) return requestAddress.trim();
+
+  const directAddress = kind === "pickup"
+    ? booking?.pickupAddress || booking?.pickupPoint?.address || booking?.pickup?.address
+    : booking?.dropoffAddress || booking?.dropoffPoint?.address || booking?.dropoff?.address;
+  if (typeof directAddress === "string" && directAddress.trim()) return directAddress.trim();
+
+  const matchAddress = kind === "pickup"
+    ? booking?.match?.pickupPoints?.[0]?.address
+    : booking?.match?.dropoffPoints?.[0]?.address;
+  if (typeof matchAddress === "string" && matchAddress.trim()) return matchAddress.trim();
+
+  if (coords) return coordsToLabel(coords);
+  return "Same as offer";
+}
+
 function fmtDate(raw: string | undefined): string {
   if (!raw) return "—";
   try {
-    return new Date(raw).toLocaleString("en-PK", {
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return "—";
+    return parsed.toLocaleString("en-PK", {
       dateStyle: "medium",
       timeStyle: "short",
     });
   } catch {
     return raw;
   }
+}
+
+function toLocalDateTimeInputValue(raw: string | undefined): string {
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hour = String(parsed.getHours()).padStart(2, "0");
+  const minute = String(parsed.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function splitLocalDateTimeInputValue(raw: string | undefined): { date: string; time: string } {
+  const value = toLocalDateTimeInputValue(raw);
+  if (!value) return { date: "", time: "" };
+  const [date = "", time = ""] = value.split("T");
+  return { date, time };
+}
+
+function toIsoFromLocalDateTimeInputValue(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const [datePart, timePart = "00:00"] = raw.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute)
+  ) {
+    return undefined;
+  }
+
+  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
 function statusColor(s: OfferStatus): string {
@@ -228,6 +305,52 @@ function FieldRow({
   );
 }
 
+function AddressInput({ value, placeholder, icon, suggestions, loading, onChange, onSelect, onClear }: any) {
+  return (
+    <div className="relative">
+      <div className={`flex items-center gap-2 border rounded-xl px-3 py-2.5 transition-colors bg-white ${value ? "border-emerald-300" : "border-gray-200"} focus-within:border-emerald-400`}>
+        <span className="text-emerald-500 flex-shrink-0">{icon}</span>
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="flex-1 text-sm text-gray-800 placeholder-gray-400 outline-none bg-transparent"
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={onClear}
+            className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-200 text-gray-600 transition-colors hover:bg-gray-300"
+          >
+            <X size={10} />
+          </button>
+        )}
+      </div>
+      {loading && (
+        <div className="absolute left-3 top-full z-10 mt-1 flex items-center gap-1 text-xs text-gray-400">
+          <RefreshCw size={10} className="animate-spin" />
+          Searching...
+        </div>
+      )}
+      {suggestions.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl shadow-gray-100">
+          {suggestions.slice(0, 5).map((s: any, i: number) => (
+            <button
+              key={`${s.address}-${i}`}
+              type="button"
+              onClick={() => onSelect(s)}
+              className="flex w-full items-start gap-3 border-b border-gray-50 px-4 py-3 text-left transition-colors hover:bg-emerald-50 last:border-0"
+            >
+              <Navigation size={13} className="mt-0.5 flex-shrink-0 text-emerald-400" />
+              <span className="text-sm leading-snug text-gray-700">{s.address}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  MetaItem                                                            */
 /* ------------------------------------------------------------------ */
@@ -256,12 +379,17 @@ function BookingDetailsModal({ offer, onClose }: { offer: Offer; onClose: () => 
       setLoading(true);
       setError(null);
       try {
-        const res = await api.get(`/bookings?offerId=${offer._id}`);
+        const res = await api.get(`/bookings?role=driver&offerId=${offer._id}`);
         const list =
           res.data?.data?.bookings ||
           res.data?.bookings ||
           (Array.isArray(res.data) ? res.data : []);
-        setBookings(list);
+        setBookings(
+          list.filter((booking: any) =>
+            !booking.hiddenForDriver &&
+            ACTIVE_BOOKING_STATUSES.includes(String(booking.status || ""))
+          )
+        );
       } catch {
         setError("Failed to load booking details.");
       } finally {
@@ -275,7 +403,8 @@ function BookingDetailsModal({ offer, onClose }: { offer: Offer; onClose: () => 
   const destLabel   = useReverseGeocode(offer.destination?.coordinates, offer.destinationAddress);
   const bookedSeats = bookings.reduce((sum, booking) => sum + Number(booking.seatsRequested || booking.seatCount || booking.seats || 1), 0);
   const confirmedRiders = bookings.filter((booking) => ["confirmed", "picked_up", "live", "completed"].includes(booking.status)).length;
-  const seatsTotal = Number(offer.seatsTotal || offer.seatsAvailable + bookedSeats);
+  const seatsTotal = getOfferSeatsTotal(offer, { riders: bookings.length, bookedSeats, confirmedRiders });
+  const seatsRemaining = Math.max(0, seatsTotal - bookedSeats);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
@@ -324,7 +453,7 @@ function BookingDetailsModal({ offer, onClose }: { offer: Offer; onClose: () => 
           </div>
           <div>
             <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-0.5">Seats left</p>
-            <p className="text-xs text-gray-700 font-medium">{offer.seatsAvailable}</p>
+            <p className="text-xs text-gray-700 font-medium">{seatsRemaining}</p>
           </div>
           <div>
             <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-0.5">Seats filled</p>
@@ -364,8 +493,10 @@ function BookingDetailsModal({ offer, onClose }: { offer: Offer; onClose: () => 
                 : (typeof fareRaw === "number" ? fareRaw : seats * offer.pricePerSeat);
 
               // Rider's requested pickup / dropoff (if stored on booking)
-              const pickupCoords   = b.pickupPoint?.coordinates  || b.pickup?.coordinates;
-              const dropoffCoords  = b.dropoffPoint?.coordinates || b.dropoff?.coordinates;
+              const pickupCoords   = b.pickupPoint?.coordinates || b.pickup?.coordinates || b.match?.pickupPoints?.[0]?.coordinates || b.request?.origin?.coordinates;
+              const dropoffCoords  = b.dropoffPoint?.coordinates || b.dropoff?.coordinates || b.match?.dropoffPoints?.[0]?.coordinates || b.request?.destination?.coordinates;
+              const pickupLabel = resolveBookingStopLabel(b, "pickup", pickupCoords);
+              const dropoffLabel = resolveBookingStopLabel(b, "dropoff", dropoffCoords);
 
               return (
                 <div key={b._id}
@@ -397,7 +528,7 @@ function BookingDetailsModal({ offer, onClose }: { offer: Offer; onClose: () => 
                         <MapPin size={10} /> Pickup
                       </p>
                       <p className="text-xs text-gray-700 font-medium">
-                        {pickupCoords ? coordsToLabel(pickupCoords) : "Same as offer"}
+                        {pickupLabel}
                       </p>
                     </div>
                     <div>
@@ -405,7 +536,7 @@ function BookingDetailsModal({ offer, onClose }: { offer: Offer; onClose: () => 
                         <Navigation size={10} /> Drop-off
                       </p>
                       <p className="text-xs text-gray-700 font-medium">
-                        {dropoffCoords ? coordsToLabel(dropoffCoords) : "Same as offer"}
+                        {dropoffLabel}
                       </p>
                     </div>
                     <div>
@@ -455,13 +586,17 @@ function EditDialog({
 
   const [lng0, lat0] = offer.origin?.coordinates      || [0, 0];
   const [lng1, lat1] = offer.destination?.coordinates || [0, 0];
+  const initialDepartureParts = splitLocalDateTimeInputValue(offer.departureTime);
 
   const [fields, setFields] = useState({
     originLat:        String(lat0),
     originLng:        String(lng0),
     destinationLat:   String(lat1),
     destinationLng:   String(lng1),
-    departureTime:    offer.departureTime?.slice(0, 16) || "",
+    originAddress:    String(offer.originAddress || coordsToLabel(offer.origin?.coordinates)),
+    destinationAddress: String(offer.destinationAddress || coordsToLabel(offer.destination?.coordinates)),
+    departureDate:    initialDepartureParts.date,
+    departureTime:    initialDepartureParts.time,
     seatsAvailable:   String(offer.seatsAvailable ?? ""),
     pricePerSeat:     String(offer.pricePerSeat ?? ""),
     prefMusic:        offer.preferences?.music        ?? true,
@@ -478,6 +613,9 @@ function EditDialog({
     | "originLng"
     | "destinationLat"
     | "destinationLng"
+    | "originAddress"
+    | "destinationAddress"
+    | "departureDate"
     | "departureTime"
     | "seatsAvailable"
     | "pricePerSeat"
@@ -509,21 +647,66 @@ function EditDialog({
     setFields((f) => ({ ...f, recurrenceDays: ["mon"] }));
   }, [fields.isRecurring, fields.recurrencePattern, fields.recurrenceDays.length]);
 
+  const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+  const [originSugg, setOriginSugg] = useState<any[]>([]);
+  const [destinationSugg, setDestinationSugg] = useState<any[]>([]);
+  const [loadingOrigin, setLoadingOrigin] = useState(false);
+  const [loadingDestination, setLoadingDestination] = useState(false);
+
+  const fetchSuggestions = async (q: string, type: "origin" | "destination") => {
+    if (q.trim().length < 2) {
+      if (type === "origin") setOriginSugg([]);
+      else setDestinationSugg([]);
+      return;
+    }
+
+    type === "origin" ? setLoadingOrigin(true) : setLoadingDestination(true);
+    try {
+      const combined = await fetchAddressSuggestions(q, googleMapsApiKey, 6);
+      if (type === "origin") setOriginSugg(combined);
+      else setDestinationSugg(combined);
+    } finally {
+      type === "origin" ? setLoadingOrigin(false) : setLoadingDestination(false);
+    }
+  };
+
+  const debouncedOrigin = useCallback(debounce((q: string) => fetchSuggestions(q, "origin"), 300), []);
+  const debouncedDestination = useCallback(debounce((q: string) => fetchSuggestions(q, "destination"), 300), []);
+
+  useEffect(() => () => {
+    debouncedOrigin.cancel();
+    debouncedDestination.cancel();
+  }, [debouncedOrigin, debouncedDestination]);
+
   const handleSave = async () => {
     setSaving(true);
+    const departureDateTime = fields.departureDate && fields.departureTime
+      ? `${fields.departureDate}T${fields.departureTime}`
+      : undefined;
+    const resolvedOriginCoords =
+      fields.originAddress.trim()
+        ? await resolveAddressCoordinates(fields.originAddress.trim(), googleMapsApiKey).catch(() => null)
+        : null;
+    const resolvedDestinationCoords =
+      fields.destinationAddress.trim()
+        ? await resolveAddressCoordinates(fields.destinationAddress.trim(), googleMapsApiKey).catch(() => null)
+        : null;
+
     // Build payload matching exactly what updateRideOffer expects
     await onSave({
       origin: {
-        lat: Number(fields.originLat),
-        lng: Number(fields.originLng),
+        lat: Number(resolvedOriginCoords?.[1] ?? fields.originLat ?? lat0),
+        lng: Number(resolvedOriginCoords?.[0] ?? fields.originLng ?? lng0),
+        address: fields.originAddress,
       },
       destination: {
-        lat: Number(fields.destinationLat),
-        lng: Number(fields.destinationLng),
+        lat: Number(resolvedDestinationCoords?.[1] ?? fields.destinationLat ?? lat1),
+        lng: Number(resolvedDestinationCoords?.[0] ?? fields.destinationLng ?? lng1),
+        address: fields.destinationAddress,
       },
-      departureTime:  fields.departureTime
-        ? new Date(fields.departureTime).toISOString()
-        : undefined,
+      originAddress: fields.originAddress,
+      destinationAddress: fields.destinationAddress,
+      departureTime: toIsoFromLocalDateTimeInputValue(departureDateTime),
       seatsAvailable: Number(fields.seatsAvailable),
       pricePerSeat:   Number(fields.pricePerSeat),
       preferences: {
@@ -575,31 +758,81 @@ function EditDialog({
 
           {/* Origin */}
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Origin coordinates</p>
-            <div className="grid grid-cols-2 gap-2">
-              <FieldRow icon={<MapPin size={13} />} placeholder="Latitude" type="number"
-                value={fields.originLat} onChange={setStr("originLat")} />
-              <FieldRow icon={<MapPin size={13} />} placeholder="Longitude" type="number"
-                value={fields.originLng} onChange={setStr("originLng")} />
-            </div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Origin</p>
+            <AddressInput
+              value={fields.originAddress}
+              placeholder="Enter pickup address"
+              icon={<MapPin size={13} />}
+              suggestions={originSugg}
+              loading={loadingOrigin}
+              onChange={(value: string) => {
+                setFields((f) => ({ ...f, originAddress: value }));
+                debouncedOrigin(value);
+              }}
+              onSelect={async (suggestion: any) => {
+                const coords = suggestion.coordinates || await resolveAddressCoordinates(suggestion.address, googleMapsApiKey, suggestion.placeId);
+                setFields((f) => ({
+                  ...f,
+                  originAddress: suggestion.address,
+                  originLng: String(coords?.[0] ?? f.originLng),
+                  originLat: String(coords?.[1] ?? f.originLat),
+                }));
+                setOriginSugg([]);
+              }}
+              onClear={() => {
+                setFields((f) => ({ ...f, originAddress: "" }));
+                setOriginSugg([]);
+              }}
+            />
           </div>
 
           {/* Destination */}
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Destination coordinates</p>
-            <div className="grid grid-cols-2 gap-2">
-              <FieldRow icon={<Navigation size={13} />} placeholder="Latitude" type="number"
-                value={fields.destinationLat} onChange={setStr("destinationLat")} />
-              <FieldRow icon={<Navigation size={13} />} placeholder="Longitude" type="number"
-                value={fields.destinationLng} onChange={setStr("destinationLng")} />
-            </div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Destination</p>
+            <AddressInput
+              value={fields.destinationAddress}
+              placeholder="Enter drop-off address"
+              icon={<Navigation size={13} />}
+              suggestions={destinationSugg}
+              loading={loadingDestination}
+              onChange={(value: string) => {
+                setFields((f) => ({ ...f, destinationAddress: value }));
+                debouncedDestination(value);
+              }}
+              onSelect={async (suggestion: any) => {
+                const coords = suggestion.coordinates || await resolveAddressCoordinates(suggestion.address, googleMapsApiKey, suggestion.placeId);
+                setFields((f) => ({
+                  ...f,
+                  destinationAddress: suggestion.address,
+                  destinationLng: String(coords?.[0] ?? f.destinationLng),
+                  destinationLat: String(coords?.[1] ?? f.destinationLat),
+                }));
+                setDestinationSugg([]);
+              }}
+              onClear={() => {
+                setFields((f) => ({ ...f, destinationAddress: "" }));
+                setDestinationSugg([]);
+              }}
+            />
           </div>
 
           {/* Schedule */}
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Departure time</p>
-            <FieldRow icon={<Calendar size={13} />} type="datetime-local"
-              value={fields.departureTime} onChange={setStr("departureTime")} />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <DateField
+                value={fields.departureDate}
+                onChange={(value) => setFields((f) => ({ ...f, departureDate: value }))}
+                label="Date"
+                className="border border-gray-200 bg-white shadow-sm text-gray-800"
+              />
+              <TimeField
+                value={fields.departureTime}
+                onChange={(value) => setFields((f) => ({ ...f, departureTime: value }))}
+                label="Time"
+                className="border border-gray-200 bg-white shadow-sm text-gray-800"
+              />
+            </div>
           </div>
 
           {/* Seats & Price */}
@@ -791,7 +1024,8 @@ const OfferCard = forwardRef<HTMLDivElement, {
   const originName  = useReverseGeocode(offer.origin?.coordinates, offer.originAddress);
   const destName    = useReverseGeocode(offer.destination?.coordinates, offer.destinationAddress);
   const isCancelled = offer.status === "cancelled";
-  const seatsTotal = Number(offer.seatsTotal || offer.seatsAvailable + summary.bookedSeats);
+  const seatsTotal = getOfferSeatsTotal(offer, summary);
+  const seatsRemaining = getOfferSeatsRemaining(offer, summary);
 
   const prefLabels = offer.preferences
     ? [
@@ -844,7 +1078,7 @@ const OfferCard = forwardRef<HTMLDivElement, {
             <MetaItem
               icon={<Users size={12} />}
               label="Seats available"
-              value={`${offer.seatsAvailable} left`}
+              value={`${seatsRemaining} left`}
             />
             <MetaItem
               icon={<Hash size={12} />}
@@ -854,7 +1088,7 @@ const OfferCard = forwardRef<HTMLDivElement, {
             <MetaItem
               icon={<Users size={12} />}
               label="Riders"
-              value={`${summary.riders} linked • ${summary.confirmedRiders} active`}
+              value={`${summary.riders} confirmed • ${summary.confirmedRiders} active`}
             />
             {prefLabels && (
               <MetaItem icon={<Car size={12} />} label="Preferences" value={prefLabels} />
@@ -865,7 +1099,7 @@ const OfferCard = forwardRef<HTMLDivElement, {
           </div>
 
           {/* Seat dots */}
-          <SeatBar available={offer.seatsAvailable} />
+          <SeatBar available={seatsRemaining} />
           <div className="mt-3 rounded-2xl bg-gray-50 border border-gray-100 px-3 py-3 text-xs text-gray-600">
             <p className="font-semibold text-gray-900">Next step</p>
             <p className="mt-1">
@@ -930,7 +1164,7 @@ const MyOffers = () => {
     try {
       const [offersRes, bookingsRes] = await Promise.all([
         api.get("/rides/offers/me"),
-        api.get("/bookings"),
+        api.get("/bookings?role=driver"),
       ]);
       const list: Offer[] =
         offersRes.data?.data?.offers ||
@@ -940,7 +1174,10 @@ const MyOffers = () => {
         bookingsRes.data?.data?.bookings ||
         bookingsRes.data?.bookings ||
         (Array.isArray(bookingsRes.data) ? bookingsRes.data : []);
-      const summary = bookings.filter((booking: any) => !booking.hiddenForDriver).reduce((acc: Record<string, OfferBookingSummary>, booking: any) => {
+      const summary = bookings.filter((booking: any) =>
+        !booking.hiddenForDriver &&
+        ACTIVE_BOOKING_STATUSES.includes(String(booking.status || ""))
+      ).reduce((acc: Record<string, OfferBookingSummary>, booking: any) => {
         const offerId = booking.offer?._id || booking.offerId || booking.offer;
         if (!offerId) return acc;
         if (!acc[offerId]) {

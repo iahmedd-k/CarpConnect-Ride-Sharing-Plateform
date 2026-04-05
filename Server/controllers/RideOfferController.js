@@ -5,8 +5,49 @@ const RideRequest = require('../models/RideRequest');
 const asyncHandler = require('express-async-handler');
 const { createAndEmitNotification } = require('../utils/notifications');
 const { calculateRouteDistance, calculateRouteDuration } = require('../utils/geospatial');
+const { setRideSnapshot } = require('../utils/rideSnapshotCache');
 
-const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'picked_up', 'live'];
+const ACTIVE_BOOKING_STATUSES = ['confirmed', 'picked_up', 'live'];
+
+const withEffectiveSeatAvailability = async (offers) => {
+  const normalizedOffers = Array.isArray(offers) ? offers : [];
+  if (!normalizedOffers.length) return [];
+
+  const offerIds = normalizedOffers.map((offer) => offer?._id).filter(Boolean);
+  const bookings = await Booking.find({
+    offerId: { $in: offerIds },
+    status: { $in: ACTIVE_BOOKING_STATUSES }
+  })
+    .select('offerId seatCount')
+    .lean();
+
+  const bookedSeatsByOffer = bookings.reduce((acc, booking) => {
+    const offerId = String(booking.offerId || '');
+    if (!offerId) return acc;
+    acc[offerId] = (acc[offerId] || 0) + Math.max(1, Number(booking.seatCount || 1));
+    return acc;
+  }, {});
+
+  return normalizedOffers.map((offer) => {
+    const totalSeats = Math.max(1, Number(offer?.seatsTotal || offer?.seatsAvailable || 1));
+    const bookedSeats = Number(bookedSeatsByOffer[String(offer?._id || '')] || 0);
+    const effectiveSeatsAvailable = Math.max(0, totalSeats - bookedSeats);
+    const nextStatus =
+      !offer?.startedAt &&
+      !offer?.completedAt &&
+      effectiveSeatsAvailable > 0 &&
+      ['active', 'matched', 'booked'].includes(String(offer?.status || '').toLowerCase())
+        ? 'open'
+        : offer?.status;
+
+    return {
+      ...offer,
+      status: nextStatus,
+      seatsTotal: totalSeats,
+      seatsAvailable: effectiveSeatsAvailable
+    };
+  });
+};
 
 const reconcileOfferStatus = async (offerLike) => {
   if (!offerLike?._id) return offerLike;
@@ -34,7 +75,7 @@ const reconcileOfferStatus = async (offerLike) => {
     };
   }
 
-  if (activeBookings === 0 && completedBookings === 0 && ['active', 'booked'].includes(String(offerLike.status || ''))) {
+  if (activeBookings === 0 && completedBookings === 0 && ['active', 'booked', 'matched'].includes(String(offerLike.status || ''))) {
     await RideOffer.updateOne(
       { _id: offerLike._id },
       { $set: { status: 'open' } }
@@ -264,6 +305,7 @@ const createRideOffer = asyncHandler(async (req, res) => {
     status: 'open',
     createdAt: new Date()
   });
+  setRideSnapshot(rideOffer);
 
   await materializeNextRecurringOffer(rideOffer);
 
@@ -321,6 +363,7 @@ const updateOfferStatus = asyncHandler(async (req, res) => {
   // Update status
   rideOffer.status = status;
   await rideOffer.save();
+  setRideSnapshot(rideOffer);
 
   // Emit event for real-time updates
   req.io?.to(`user:${rideOffer.driverId}`).emit('offerStatusUpdated', {
@@ -344,6 +387,8 @@ const updateRideOffer = asyncHandler(async (req, res) => {
   const {
     origin,
     destination,
+    originAddress,
+    destinationAddress,
     departureTime,
     seatsAvailable,
     seatsTotal,
@@ -384,15 +429,29 @@ const updateRideOffer = asyncHandler(async (req, res) => {
   if (origin) {
     rideOffer.origin = {
       type: 'Point',
-      coordinates: [origin.lng, origin.lat]
+      coordinates: [
+        Number(origin.lng ?? rideOffer.origin?.coordinates?.[0] ?? 0),
+        Number(origin.lat ?? rideOffer.origin?.coordinates?.[1] ?? 0)
+      ]
     };
   }
   
   if (destination) {
     rideOffer.destination = {
       type: 'Point',
-      coordinates: [destination.lng, destination.lat]
+      coordinates: [
+        Number(destination.lng ?? rideOffer.destination?.coordinates?.[0] ?? 0),
+        Number(destination.lat ?? rideOffer.destination?.coordinates?.[1] ?? 0)
+      ]
     };
+  }
+
+  if (originAddress !== undefined || origin?.address !== undefined) {
+    rideOffer.originAddress = String(originAddress || origin?.address || rideOffer.originAddress || '').trim();
+  }
+
+  if (destinationAddress !== undefined || destination?.address !== undefined) {
+    rideOffer.destinationAddress = String(destinationAddress || destination?.address || rideOffer.destinationAddress || '').trim();
   }
   
   if (departureTime) {
@@ -409,6 +468,14 @@ const updateRideOffer = asyncHandler(async (req, res) => {
 
   if (rideOffer.seatsTotal != null && rideOffer.seatsAvailable > rideOffer.seatsTotal) {
     rideOffer.seatsAvailable = rideOffer.seatsTotal;
+  }
+
+  const profileSeatLimit = Math.max(1, Number(req.user?.vehicle?.seats || 4));
+  if (Number(rideOffer.seatsTotal || rideOffer.seatsAvailable || 1) > profileSeatLimit) {
+    return res.status(400).json({
+      success: false,
+      message: `You can offer up to ${profileSeatLimit} seat(s) based on your vehicle profile.`
+    });
   }
   
   if (pricePerSeat !== undefined) {
@@ -478,9 +545,9 @@ const getRideOffers = asyncHandler(async (req, res) => {
     };
   }
   
-  // Only return bookable offers to riders/search pages.
-  query.status = 'open';
-  query.seatsAvailable = { $gt: 0 };
+  // Search should include any pre-start offer, then reconcile stale status
+  // and seat values from confirmed bookings instead of trusting stored fields.
+  query.status = { $in: ['open', 'matched', 'booked', 'active'] };
   query.departureTime = { $gte: new Date() };
   
   let rideOffers;
@@ -515,9 +582,13 @@ const getRideOffers = asyncHandler(async (req, res) => {
     });
   }
 
+  const offersWithEffectiveSeats = await withEffectiveSeatAvailability(
+    rideOffers.map((offer) => (offer?.toObject ? offer.toObject() : offer))
+  );
+
   const reconciledOffers = [];
-  for (const offer of rideOffers) {
-    const reconciled = await reconcileOfferStatus(offer.toObject ? offer.toObject() : offer);
+  for (const offer of offersWithEffectiveSeats) {
+    const reconciled = await reconcileOfferStatus(offer);
     if (
       String(reconciled?.status || '') === 'open' &&
       Number(reconciled?.seatsAvailable || 0) > 0 &&
@@ -553,7 +624,8 @@ const getMyRideOffers = asyncHandler(async (req, res) => {
   const refreshedOffers = await RideOffer.find({ driverId: req.user._id })
     .sort({ departureTime: 1, createdAt: -1 })
     .lean();
-  const enrichedOffers = refreshedOffers.map((offer) => enrichOfferMetrics(offer));
+  const reconciledOffers = await withEffectiveSeatAvailability(refreshedOffers);
+  const enrichedOffers = reconciledOffers.map((offer) => enrichOfferMetrics(offer));
   
   res.status(200).json({
     success: true,

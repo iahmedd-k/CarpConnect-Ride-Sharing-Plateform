@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { Star, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import api from "../lib/api";
+import { toast } from "sonner";
 
-export const RateRideModal = ({ booking, targetUser, subjectLabel = "ride partner", onClose, onSuccess }: any) => {
+export const RateRideModal = ({ booking, targetUser, subjectLabel = "ride partner", alreadyReviewed = false, onClose, onSuccess }: any) => {
     const [rating, setRating] = useState(0);
     const [hover, setHover] = useState(0);
     const [comment, setComment] = useState("");
@@ -22,7 +23,10 @@ export const RateRideModal = ({ booking, targetUser, subjectLabel = "ride partne
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (rating === 0) return alert("Please select a rating.");
+        if (rating === 0) {
+            toast.error("Please select a rating.");
+            return;
+        }
         
         setSubmitting(true);
         try {
@@ -36,7 +40,7 @@ export const RateRideModal = ({ booking, targetUser, subjectLabel = "ride partne
             onSuccess();
         } catch (err: any) {
             console.error("Failed to submit review:", err);
-            alert(err.response?.data?.message || "Failed to submit review.");
+            toast.error(err.response?.data?.message || "Failed to submit review.");
         } finally {
             setSubmitting(false);
         }
@@ -48,8 +52,20 @@ export const RateRideModal = ({ booking, targetUser, subjectLabel = "ride partne
                 <button onClick={onClose} className="absolute right-4 top-4 p-2 rounded-full hover:bg-muted/50 transition-colors">
                     <X className="w-5 h-5 text-muted-foreground" />
                 </button>
-                <h3 className="text-xl font-display font-bold mb-2">Rate your journey</h3>
-                <p className="text-sm text-muted-foreground mb-6">How was your {subjectLabel} with {resolvedTargetUser?.name || "your ride partner"}?</p>
+                <h3 className="text-xl font-display font-bold mb-2">
+                    {alreadyReviewed ? "Review already submitted" : "Rate your journey"}
+                </h3>
+                <p className="text-sm text-muted-foreground mb-6">
+                    {alreadyReviewed
+                        ? `You already reviewed ${resolvedTargetUser?.name || "this ride partner"} for this ride.`
+                        : `How was your ${subjectLabel} with ${resolvedTargetUser?.name || "your ride partner"}?`}
+                </p>
+
+                {alreadyReviewed ? (
+                    <Button type="button" onClick={onClose} className="w-full bg-gradient-primary text-white h-12 rounded-xl font-bold shadow-glow">
+                        Close
+                    </Button>
+                ) : (
                 
                 <form onSubmit={handleSubmit} className="space-y-6">
                     <div className="flex justify-center gap-2 mb-4">
@@ -102,6 +118,7 @@ export const RateRideModal = ({ booking, targetUser, subjectLabel = "ride partne
                         {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit Review"}
                     </Button>
                 </form>
+                )}
             </div>
         </div>
     );

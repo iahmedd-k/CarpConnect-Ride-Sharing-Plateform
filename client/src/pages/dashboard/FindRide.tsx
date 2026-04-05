@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 import debounce from "lodash/debounce";
 import {
     MapPin, Search, Star, Clock, Car, Navigation,
@@ -9,6 +10,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import LeafletMap from "@/components/LeafletMap";
+import { DateField } from "@/components/DateField";
+import { TimeField } from "@/components/TimeField";
 import {
     fetchAddressSuggestions,
     resolveAddressCoordinates,
@@ -18,6 +21,11 @@ import api from "../../lib/api";
 import { toast } from "sonner";
 import { normalizeOfferStatus } from "@/lib/rideStatus";
 
+const SOCKET_URL = import.meta.env.VITE_API_URL
+    ? import.meta.env.VITE_API_URL.replace("/api", "")
+    : "http://localhost:5000";
+const RIDE_SNAPSHOT_CACHE_KEY = "carpconnect_ride_snapshot_cache";
+
 // ─────────────────────── Types ─────────────────────────────────────────────────
 interface RideResult {
     _id: string;
@@ -25,6 +33,7 @@ interface RideResult {
     destination: string;
     originCoords: number[] | null;
     destinationCoords: number[] | null;
+    routeCoords?: number[][] | null;
     departureTime: string;
     pricePerSeat: number;
     currency: string;
@@ -44,6 +53,103 @@ interface RideResult {
     };
 }
 
+type RideSnapshot = {
+    _id: string;
+    origin?: string;
+    destination?: string;
+    originCoords?: number[] | null;
+    destinationCoords?: number[] | null;
+    routeCoords?: number[][] | null;
+    departureTime?: string;
+    estimatedDistanceKm?: number;
+    estimatedDurationMin?: number;
+};
+
+const toIsoDateLocal = (value: Date) => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+};
+
+const todayLocal = () => toIsoDateLocal(new Date());
+
+const PAK_LAT_RANGE: [number, number] = [23, 38];
+const PAK_LNG_RANGE: [number, number] = [60, 78];
+
+const isInRange = (value: number, [min, max]: [number, number]) => value >= min && value <= max;
+
+const coerceLngLat = (value: any): [number, number] | null => {
+    if (!Array.isArray(value) || value.length < 2) return null;
+    const first = Number(value[0]);
+    const second = Number(value[1]);
+    if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+
+    const firstLooksLng = isInRange(first, PAK_LNG_RANGE);
+    const secondLooksLat = isInRange(second, PAK_LAT_RANGE);
+    if (firstLooksLng && secondLooksLat) return [first, second];
+
+    const firstLooksLat = isInRange(first, PAK_LAT_RANGE);
+    const secondLooksLng = isInRange(second, PAK_LNG_RANGE);
+    if (firstLooksLat && secondLooksLng) return [second, first];
+
+    if (Math.abs(first) <= 180 && Math.abs(second) <= 90) return [first, second];
+    if (Math.abs(first) <= 90 && Math.abs(second) <= 180) return [second, first];
+    return null;
+};
+
+const parseLocalDateTime = (value: string) => {
+    if (!value) return null;
+    const [datePart, timePart = "00:00"] = value.split("T");
+    const [year, month, day] = datePart.split("-").map(Number);
+    const [hour, minute] = timePart.split(":").map(Number);
+
+    if (
+        !Number.isFinite(year) ||
+        !Number.isFinite(month) ||
+        !Number.isFinite(day) ||
+        !Number.isFinite(hour) ||
+        !Number.isFinite(minute)
+    ) {
+        return null;
+    }
+
+    const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const toIsoFromLocalDateTime = (value: string) => parseLocalDateTime(value)?.toISOString() || "";
+
+const toLocalDateTimeInputValue = (raw?: string) => {
+    if (!raw) return "";
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return "";
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, "0");
+    const day = String(parsed.getDate()).padStart(2, "0");
+    const hour = String(parsed.getHours()).padStart(2, "0");
+    const minute = String(parsed.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hour}:${minute}`;
+};
+
+const dismissRideFromResults = (
+    rides: RideResult[],
+    rideId: string,
+    selected: RideResult | null
+) => {
+    const nextRides = rides.filter((ride) => ride._id !== rideId);
+    const nextSelected = selected?._id === rideId ? (nextRides[0] || null) : selected;
+    return { nextRides, nextSelected };
+};
+
+const normalizeLatLngPoint = (value: any): [number, number] | undefined => {
+    if (!Array.isArray(value) || value.length < 2) return undefined;
+    const first = Number(value[0]);
+    const second = Number(value[1]);
+    if (!Number.isFinite(first) || !Number.isFinite(second)) return undefined;
+    return [first, second];
+};
+
 const shortAddress = (value: any, fallback = "—") => {
     const text = typeof value === "string"
         ? value
@@ -52,6 +158,80 @@ const shortAddress = (value: any, fallback = "—") => {
     if (["origin", "destination", "pickup", "dropoff"].includes(text.trim().toLowerCase())) return fallback;
     return text.split(",")[0] || fallback;
 };
+
+const isCoordinateLikeText = (value: any) => {
+    const text = String(value || "").trim();
+    if (!text) return false;
+    return /^-?\d+(?:\.\d+)?\s*[, ]\s*-?\d+(?:\.\d+)?$/.test(text);
+};
+
+const normalizeAddressText = (value: any) =>
+    String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, " ")
+        .replace(/\bislamabad\b|\bpakistan\b|\bmarkaz\b|\bsector\b/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+const extractSectorKey = (value: any) => {
+    const normalized = normalizeAddressText(value);
+    const match = normalized.match(/\b([a-z])\s*-?\s*(\d{1,2})\b/i);
+    if (!match) return "";
+    return `${String(match[1]).toLowerCase()}-${String(match[2])}`;
+};
+
+const addressTokenSimilarity = (a: any, b: any) => {
+    const tokensA = new Set(normalizeAddressText(a).split(" ").filter((token) => token.length >= 2));
+    const tokensB = new Set(normalizeAddressText(b).split(" ").filter((token) => token.length >= 2));
+    if (!tokensA.size || !tokensB.size) return 0;
+    let overlap = 0;
+    tokensA.forEach((token) => {
+        if (tokensB.has(token)) overlap += 1;
+    });
+    return overlap / Math.max(tokensA.size, tokensB.size);
+};
+
+const haversineDistanceKm = (from?: number[] | null, to?: number[] | null) => {
+    if (!Array.isArray(from) || !Array.isArray(to) || from.length < 2 || to.length < 2) return undefined;
+    const [fromLng, fromLat] = [Number(from[0]), Number(from[1])];
+    const [toLng, toLat] = [Number(to[0]), Number(to[1])];
+    if (![fromLng, fromLat, toLng, toLat].every(Number.isFinite)) return undefined;
+
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const earthRadiusKm = 6371;
+    const dLat = toRad(toLat - fromLat);
+    const dLng = toRad(toLng - fromLng);
+    const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(fromLat)) * Math.cos(toRad(toLat)) * Math.sin(dLng / 2) ** 2;
+
+    return Number((earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(1));
+};
+
+const loadRideSnapshotCache = (): Record<string, RideSnapshot> => {
+    try {
+        const raw = localStorage.getItem(RIDE_SNAPSHOT_CACHE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+        return {};
+    }
+};
+
+const saveRideSnapshotCache = (cache: Record<string, RideSnapshot>) => {
+    try {
+        localStorage.setItem(RIDE_SNAPSHOT_CACHE_KEY, JSON.stringify(cache));
+    } catch {
+        // ignore local storage failures
+    }
+};
+
+const looksUnknownLabel = (value: any) => {
+    const text = String(value || "").trim().toLowerCase();
+    return !text || text === "unknown" || text === "unknown origin" || text === "unknown destination";
+};
+
+const SEARCH_MATCH_RADIUS_KM = 3;
 
 // ─────────────────────── Seat Book Modal ────────────────────────────────────────
 interface SeatBookModalProps {
@@ -73,12 +253,12 @@ function SeatBookModal({ ride, onConfirm, onClose, loading }: SeatBookModalProps
     return (
         <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-md p-4"
             onClick={e => e.target === e.currentTarget && onClose()}
         >
             <motion.div
                 initial={{ scale: 0.93, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.93, y: 20 }}
-                className="w-full max-w-sm bg-card rounded-3xl border border-border/50 shadow-2xl overflow-hidden"
+                className="isolate w-full max-w-sm bg-card rounded-3xl border border-border/50 shadow-2xl overflow-hidden"
             >
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-border/40">
@@ -188,12 +368,8 @@ function SeatBookModal({ ride, onConfirm, onClose, loading }: SeatBookModalProps
                                             <span className="text-xs text-foreground font-semibold">{fmt2(ride.pricePerSeat * seats)}</span>
                                         </div>
                                         <div className="flex items-center justify-between">
-                                            <span className="text-xs text-muted-foreground font-bold">Platform Fee</span>
-                                            <span className="text-xs text-foreground font-semibold">{fmt2(Math.round(ride.pricePerSeat * seats * 0.1))}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between">
                                             <span className="text-xs text-muted-foreground font-bold">Total</span>
-                                            <span className="text-xs text-primary font-bold">{fmt2(Math.round(ride.pricePerSeat * seats * 1.1))}</span>
+                                            <span className="text-xs text-primary font-bold">{fmt2(ride.pricePerSeat * seats)}</span>
                                         </div>
                                     </div>
                                 </motion.div>
@@ -301,7 +477,9 @@ function AddressInput({ id, value, placeholder, icon, suggestions, loading, onCh
 
     return (
         <div ref={ref} className="relative">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 z-10 pointer-events-none">{icon}</div>
+            <div className="absolute left-4 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center pointer-events-none text-muted-foreground/60">
+                {icon}
+            </div>
             <input
                 id={id}
                 value={value}
@@ -309,15 +487,15 @@ function AddressInput({ id, value, placeholder, icon, suggestions, loading, onCh
                 placeholder={placeholder}
                 onChange={e => { onChange(e.target.value); setOpen(true); }}
                 onFocus={() => suggestions.length > 0 && setOpen(true)}
-                className="w-full bg-muted/30 border border-border rounded-xl pl-11 pr-9 py-3.5 text-sm
+                className="h-[52px] w-full bg-muted/30 border border-border rounded-xl pl-12 pr-10 text-sm leading-none
                            focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all
                            placeholder:text-muted-foreground/50 text-foreground"
             />
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            <div className="absolute right-3 top-1/2 flex h-5 -translate-y-1/2 items-center gap-1">
                 {loading && <Loader2 className="w-4 h-4 text-primary/60 animate-spin" />}
                 {value && !loading && (
                     <button type="button" onClick={onClear} tabIndex={-1}
-                        className="p-0.5 rounded-full hover:bg-muted/60 transition-colors">
+                        className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-muted/60 transition-colors">
                         <X className="w-3.5 h-3.5 text-muted-foreground/60" />
                     </button>
                 )}
@@ -327,17 +505,19 @@ function AddressInput({ id, value, placeholder, icon, suggestions, loading, onCh
                     <motion.div
                         initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }}
                         transition={{ duration: 0.15 }}
-                        className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-card border border-border
+                        className="absolute left-0 right-0 top-full mt-1.5 z-50 min-w-full bg-card border border-border
                                    rounded-2xl shadow-2xl overflow-hidden"
                     >
                         {suggestions.map((s, i) => (
                             <button key={i} type="button"
                                 onClick={() => { onSelect(s); setOpen(false); }}
-                                className="w-full text-left px-4 py-3 text-sm flex items-center gap-3
+                                className="w-full text-left px-4 py-3 text-sm flex items-start gap-3
                                            hover:bg-primary/5 transition-colors border-b border-border/30 last:border-0"
                             >
-                                <MapPin className="w-3.5 h-3.5 text-primary/50 shrink-0" />
-                                <span className="truncate">{s.address}</span>
+                                <MapPin className="mt-0.5 w-3.5 h-3.5 text-primary/50 shrink-0" />
+                                <span className="block min-w-0 flex-1 break-words leading-5 text-foreground">
+                                    {s.address}
+                                </span>
                             </button>
                         ))}
                     </motion.div>
@@ -420,6 +600,7 @@ const FindRide = ({
     const [hasSearched, setHasSearched] = useState(false);
     const [selected, setSelected] = useState<RideResult | null>(null);
     const [bookedIds, setBookedIds] = useState<Record<string, boolean>>({});
+    const rideSnapshotCacheRef = useRef<Record<string, RideSnapshot>>(loadRideSnapshotCache());
 
     // ── Booking
     const [bookingId, setBookingId] = useState<string | null>(null);
@@ -533,78 +714,121 @@ const FindRide = ({
             if (!candidate) continue;
 
             if (Array.isArray(candidate) && candidate.length >= 2) {
-                const lng = Number(candidate[0]);
-                const lat = Number(candidate[1]);
-                if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
+                const normalized = coerceLngLat(candidate);
+                if (normalized) return normalized;
             }
 
             if (Array.isArray(candidate.coordinates) && candidate.coordinates.length >= 2) {
-                const lng = Number(candidate.coordinates[0]);
-                const lat = Number(candidate.coordinates[1]);
-                if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
+                const normalized = coerceLngLat(candidate.coordinates);
+                if (normalized) return normalized;
             }
 
             if (Array.isArray(candidate.point?.coordinates) && candidate.point.coordinates.length >= 2) {
-                const lng = Number(candidate.point.coordinates[0]);
-                const lat = Number(candidate.point.coordinates[1]);
-                if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
+                const normalized = coerceLngLat(candidate.point.coordinates);
+                if (normalized) return normalized;
             }
 
             if (
                 typeof candidate.lng !== "undefined" &&
                 typeof candidate.lat !== "undefined"
             ) {
-                const lng = Number(candidate.lng);
-                const lat = Number(candidate.lat);
-                if (Number.isFinite(lng) && Number.isFinite(lat)) return [lng, lat];
+                const normalized = coerceLngLat([candidate.lng, candidate.lat]);
+                if (normalized) return normalized;
             }
         }
         return null;
     };
 
     const normalizeRide = (raw: any, index: number): RideResult => {
+        const rideId = String(raw?._id || raw?.id || `ride-${index}`);
+        const cached = rideSnapshotCacheRef.current[rideId] || {};
         const driverRaw = raw?.driver || raw?.driverId || {};
         const originTextCandidate = pickAddress(
             raw?.origin,
-            pickAddress(raw?.from, String(raw?.originAddress || "").trim() || "Unknown origin")
+            pickAddress(raw?.from, String(raw?.originAddress || cached.origin || "").trim() || "Unknown origin")
         );
         const destinationTextCandidate = pickAddress(
             raw?.destination,
-            pickAddress(raw?.to, String(raw?.destinationAddress || "").trim() || "Unknown destination")
+            pickAddress(raw?.to, String(raw?.destinationAddress || cached.destination || "").trim() || "Unknown destination")
         );
         const originText = ["origin", "pickup"].includes(String(originTextCandidate || "").toLowerCase())
+            ? "Unknown origin"
+            : isCoordinateLikeText(originTextCandidate)
             ? "Unknown origin"
             : originTextCandidate;
         const destinationText = ["destination", "dropoff"].includes(String(destinationTextCandidate || "").toLowerCase())
             ? "Unknown destination"
+            : isCoordinateLikeText(destinationTextCandidate)
+            ? "Unknown destination"
             : destinationTextCandidate;
 
+        const originCoords = pickCoords(
+            cached.originCoords,
+            raw?.originCoords,
+            raw?.origin,
+            raw?.from,
+            raw?.origin?.point,
+            raw?.from?.point
+        );
+        const destinationCoords = pickCoords(
+            cached.destinationCoords,
+            raw?.destinationCoords,
+            raw?.destination,
+            raw?.to,
+            raw?.destination?.point,
+            raw?.to?.point
+        );
+        const directDistanceKm = haversineDistanceKm(originCoords, destinationCoords);
+        const normalizedRouteCoords = Array.isArray(raw?.routeCoords)
+            ? raw.routeCoords.map((point: any) => coerceLngLat(point)).filter(Boolean)
+            : Array.isArray(raw?.route?.coordinates)
+            ? raw.route.coordinates.map((point: any) => coerceLngLat(point)).filter(Boolean)
+            : Array.isArray(raw?.routeGeoJson?.geometry?.coordinates)
+            ? raw.routeGeoJson.geometry.coordinates.map((point: any) => coerceLngLat(point)).filter(Boolean)
+            : Array.isArray(raw?.routeGeoJson?.coordinates)
+            ? raw.routeGeoJson.coordinates.map((point: any) => coerceLngLat(point)).filter(Boolean)
+            : [];
+        const hasDetailedRoute = normalizedRouteCoords.length > 2;
+        const routeStart = hasDetailedRoute ? normalizedRouteCoords[0] : null;
+        const routeEnd = hasDetailedRoute ? normalizedRouteCoords[normalizedRouteCoords.length - 1] : null;
+        const routeDistanceKm = hasDetailedRoute
+            ? normalizedRouteCoords.reduce((sum, point, idx, arr) => {
+                if (!point || idx === 0 || !arr[idx - 1]) return sum;
+                return sum + Number(haversineDistanceKm(arr[idx - 1], point) || 0);
+            }, 0)
+            : 0;
+        const durationFromDistance = routeDistanceKm > 0
+            ? Math.max(1, Math.round((routeDistanceKm / 35) * 60))
+            : directDistanceKm
+            ? Math.max(1, Math.round((directDistanceKm / 35) * 60))
+            : undefined;
+        const routeMatchesEndpoints = Boolean(
+            hasDetailedRoute &&
+            routeStart &&
+            routeEnd &&
+            originCoords &&
+            destinationCoords &&
+            (haversineDistanceKm(routeStart, originCoords) || 999) <= 3 &&
+            (haversineDistanceKm(routeEnd, destinationCoords) || 999) <= 3
+        );
+
         return {
-            _id: String(raw?._id || raw?.id || `ride-${index}`),
+            _id: rideId,
             origin: originText,
             destination: destinationText,
-            originCoords: pickCoords(
-                raw?.originCoords,
-                raw?.origin,
-                raw?.from,
-                raw?.origin?.point,
-                raw?.from?.point
-            ),
-            destinationCoords: pickCoords(
-                raw?.destinationCoords,
-                raw?.destination,
-                raw?.to,
-                raw?.destination?.point,
-                raw?.to?.point
-            ),
-            departureTime: raw?.departureTime || raw?.estimatedDeparture || new Date().toISOString(),
+            originCoords,
+            destinationCoords,
+            routeCoords: routeMatchesEndpoints ? normalizedRouteCoords : (cached.routeCoords || null),
+            departureTime: raw?.departureTime || raw?.estimatedDeparture || cached.departureTime || "",
             pricePerSeat: Number(raw?.pricePerSeat || 0),
             currency: raw?.currency || "PKR",
             seatsAvailable: Number(raw?.seatsAvailable ?? raw?.availableSeats ?? 0),
             seatsTotal: Number(raw?.seatsTotal ?? raw?.totalSeats ?? 0) || undefined,
             isFull: Boolean(raw?.isFull),
-            estimatedDistanceKm: Number(raw?.estimatedDistanceKm ?? raw?.distanceKm ?? 0) || undefined,
-            estimatedDurationMin: Number(raw?.estimatedDurationMin ?? raw?.durationMin ?? 0) || undefined,
+            estimatedDistanceKm: routeMatchesEndpoints
+                ? Number(routeDistanceKm.toFixed(1))
+                : (directDistanceKm || cached.estimatedDistanceKm),
+            estimatedDurationMin: durationFromDistance || cached.estimatedDurationMin,
             status: normalizeOfferStatus(raw?.status),
             driver: {
                 _id: driverRaw?._id,
@@ -630,8 +854,97 @@ const FindRide = ({
             (Array.isArray(payload?.data) ? payload.data : null) ||
             (Array.isArray(payload)       ? payload       : []);
         if (!Array.isArray(list)) return [];
-        return list.map((ride: any, idx: number) => normalizeRide(ride, idx));
+        const normalized = list.map((ride: any, idx: number) => normalizeRide(ride, idx));
+        const nextCache = { ...rideSnapshotCacheRef.current };
+        normalized.forEach((ride) => {
+            nextCache[ride._id] = {
+                _id: ride._id,
+                origin: looksUnknownLabel(ride.origin) ? nextCache[ride._id]?.origin : ride.origin,
+                destination: looksUnknownLabel(ride.destination) ? nextCache[ride._id]?.destination : ride.destination,
+                originCoords: ride.originCoords,
+                destinationCoords: ride.destinationCoords,
+                routeCoords: ride.routeCoords || nextCache[ride._id]?.routeCoords || null,
+                departureTime: ride.departureTime || nextCache[ride._id]?.departureTime || "",
+                estimatedDistanceKm: ride.estimatedDistanceKm,
+                estimatedDurationMin: ride.estimatedDurationMin,
+            };
+        });
+        rideSnapshotCacheRef.current = nextCache;
+        saveRideSnapshotCache(nextCache);
+        return normalized;
     };
+
+    const reverseGeocodePoint = async (coords: number[] | null | undefined) => {
+        if (!Array.isArray(coords) || coords.length < 2) return null;
+        const lng = Number(coords[0]);
+        const lat = Number(coords[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+
+        try {
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`,
+                { headers: { "Accept-Language": "en" } }
+            );
+            const data = await response.json();
+            return (
+                data?.address?.neighbourhood ||
+                data?.address?.suburb ||
+                data?.address?.quarter ||
+                data?.address?.city_district ||
+                data?.address?.town ||
+                data?.display_name ||
+                null
+            );
+        } catch {
+            return null;
+        }
+    };
+
+    const enrichRideLabelsFromCoords = useCallback(async (ridesToEnrich: RideResult[]) => {
+        const updates = await Promise.all(
+            ridesToEnrich.map(async (ride) => {
+                const nextOrigin = looksUnknownLabel(ride.origin) ? await reverseGeocodePoint(ride.originCoords) : null;
+                const nextDestination = looksUnknownLabel(ride.destination) ? await reverseGeocodePoint(ride.destinationCoords) : null;
+                if (!nextOrigin && !nextDestination) return null;
+                return { id: ride._id, origin: nextOrigin, destination: nextDestination };
+            })
+        );
+
+        const meaningfulUpdates = updates.filter(Boolean) as Array<{ id: string; origin: string | null; destination: string | null }>;
+        if (!meaningfulUpdates.length) return;
+
+        setRides((prev) => prev.map((ride) => {
+            const update = meaningfulUpdates.find((item) => item.id === ride._id);
+            if (!update) return ride;
+            const nextRide = {
+                ...ride,
+                origin: update.origin || ride.origin,
+                destination: update.destination || ride.destination,
+            };
+            rideSnapshotCacheRef.current[ride._id] = {
+                ...(rideSnapshotCacheRef.current[ride._id] || { _id: ride._id }),
+                origin: nextRide.origin,
+                destination: nextRide.destination,
+                originCoords: nextRide.originCoords,
+                destinationCoords: nextRide.destinationCoords,
+                routeCoords: nextRide.routeCoords || null,
+                departureTime: nextRide.departureTime,
+                estimatedDistanceKm: nextRide.estimatedDistanceKm,
+                estimatedDurationMin: nextRide.estimatedDurationMin,
+            };
+            return nextRide;
+        }));
+
+        setSelected((prev) => {
+            if (!prev) return prev;
+            const update = meaningfulUpdates.find((item) => item.id === prev._id);
+            return update
+                ? { ...prev, origin: update.origin || prev.origin, destination: update.destination || prev.destination }
+                : prev;
+        });
+
+        saveRideSnapshotCache(rideSnapshotCacheRef.current);
+    }, []);
 
     const resolveCoordsFromAddress = async (address: string, placeId?: string): Promise<number[] | null> => {
         // Use OSM Nominatim for geocoding — reliable, no API key needed
@@ -654,6 +967,75 @@ const FindRide = ({
         if (osmCoords) return osmCoords;
         return resolveAddressCoordinates(address, googleMapsApiKey, placeId);
     };
+
+    const filterManualSearchResults = useCallback((allRides: RideResult[], params: {
+        originText: string;
+        destinationText: string;
+        originCoordsValue: number[] | null;
+        destinationCoordsValue: number[] | null;
+        dateValue: string;
+    }) => {
+        const { originText, destinationText, originCoordsValue, destinationCoordsValue, dateValue } = params;
+        const normalizedOriginText = originText.trim().toLowerCase();
+        const normalizedDestinationText = destinationText.trim().toLowerCase();
+
+        const filtered = allRides.filter((ride) => {
+            const rideOrigin = String(ride.origin || "").toLowerCase();
+            const rideDestination = String(ride.destination || "").toLowerCase();
+            const originSimilarity = addressTokenSimilarity(originText, ride.origin);
+            const destinationSimilarity = addressTokenSimilarity(destinationText, ride.destination);
+            const originSectorKey = extractSectorKey(originText);
+            const rideOriginSectorKey = extractSectorKey(ride.origin);
+            const destinationSectorKey = extractSectorKey(destinationText);
+            const rideDestinationSectorKey = extractSectorKey(ride.destination);
+            const originTextMatches = normalizedOriginText
+                ? rideOrigin.includes(normalizedOriginText) ||
+                  normalizedOriginText.includes(rideOrigin) ||
+                  (originSectorKey && rideOriginSectorKey && originSectorKey === rideOriginSectorKey) ||
+                  originSimilarity >= 0.34
+                : true;
+            const destinationTextMatches = normalizedDestinationText
+                ? rideDestination.includes(normalizedDestinationText) ||
+                  normalizedDestinationText.includes(rideDestination) ||
+                  (destinationSectorKey && rideDestinationSectorKey && destinationSectorKey === rideDestinationSectorKey) ||
+                  destinationSimilarity >= 0.34
+                : true;
+            const originGeoMatches = originCoordsValue && ride.originCoords
+                ? Number(haversineDistanceKm(originCoordsValue, ride.originCoords) || Infinity) <= SEARCH_MATCH_RADIUS_KM
+                : false;
+            const destinationGeoMatches = destinationCoordsValue && ride.destinationCoords
+                ? Number(haversineDistanceKm(destinationCoordsValue, ride.destinationCoords) || Infinity) <= SEARCH_MATCH_RADIUS_KM
+                : false;
+
+            const originMatches = originCoordsValue
+                ? (originGeoMatches || originTextMatches)
+                : originTextMatches;
+
+            const destinationMatches = destinationCoordsValue
+                ? (destinationGeoMatches || destinationTextMatches)
+                : destinationTextMatches;
+
+            const dateMatches = dateValue
+                ? (() => {
+                    const rideDate = ride.departureTime ? new Date(ride.departureTime) : null;
+                    if (!rideDate || Number.isNaN(rideDate.getTime())) return false;
+                    return toIsoDateLocal(rideDate) === dateValue;
+                })()
+                : true;
+
+            return originMatches && destinationMatches && dateMatches;
+        });
+
+        return filtered.sort((a, b) => {
+            const aOriginDelta = originCoordsValue && a.originCoords ? Number(haversineDistanceKm(originCoordsValue, a.originCoords) || 999) : 0;
+            const bOriginDelta = originCoordsValue && b.originCoords ? Number(haversineDistanceKm(originCoordsValue, b.originCoords) || 999) : 0;
+            const aDestinationDelta = destinationCoordsValue && a.destinationCoords ? Number(haversineDistanceKm(destinationCoordsValue, a.destinationCoords) || 999) : 0;
+            const bDestinationDelta = destinationCoordsValue && b.destinationCoords ? Number(haversineDistanceKm(destinationCoordsValue, b.destinationCoords) || 999) : 0;
+            const aTime = a.departureTime ? new Date(a.departureTime).getTime() : Number.POSITIVE_INFINITY;
+            const bTime = b.departureTime ? new Date(b.departureTime).getTime() : Number.POSITIVE_INFINITY;
+            return (aOriginDelta + aDestinationDelta + aTime / 1e11) - (bOriginDelta + bDestinationDelta + bTime / 1e11);
+        });
+    }, []);
 
     const resolveCoordsForRequest = async () => {
         let resolvedOrigin = originCoords;
@@ -746,6 +1128,48 @@ const FindRide = ({
 
     useEffect(() => {
         fetchMyRequests();
+    }, []);
+
+    useEffect(() => {
+        const token = localStorage.getItem("carpconnect_token");
+        if (!token) return;
+
+        const socket = io(SOCKET_URL, {
+            auth: { token },
+            transports: ["websocket", "polling"],
+            reconnection: true,
+        });
+
+        const refreshRequests = () => {
+            fetchMyRequests();
+        };
+
+        socket.on("matchCreated", () => {
+            toast.success("A driver matched your request.", {
+                description: "Your request list was refreshed.",
+            });
+            refreshRequests();
+        });
+
+        socket.on("requestMatched", () => {
+            toast.success("A new ride match is ready.", {
+                description: "Open My Rides to review the matched trip.",
+            });
+            refreshRequests();
+        });
+
+        socket.on("counterOfferReceived", () => {
+            toast.info("A driver sent a counter offer.", {
+                description: "Check your request list below.",
+            });
+            refreshRequests();
+        });
+
+        socket.on("requestUpdated", refreshRequests);
+
+        return () => {
+            socket.disconnect();
+        };
     }, []);
 
     const respondCounter = async (requestId: string, action: 'accept' | 'decline') => {
@@ -844,7 +1268,7 @@ const FindRide = ({
         setDeleteModal({ open: false, requestId: null });
     };
 
-    // ── Core search: uses /api/rides/search-dest ─────────────────────────────
+    // ── Core search: uses the same stable /api/rides/offers feed as Nearby Rides ──
     const executeSearch = useCallback(async (destOverride?: string, dateOverride?: string) => {
         const destVal = (destOverride ?? destination).trim();
         if (!destVal) {
@@ -857,30 +1281,37 @@ const FindRide = ({
         setRides([]);
         setSelected(null);
 
-        const params = new URLSearchParams({ destination: destVal });
-        if (origin.trim()) params.append("origin", origin.trim());
-        if (originCoords?.length === 2) {
-            params.append("originLng", String(originCoords[0]));
-            params.append("originLat", String(originCoords[1]));
-        }
-        if (destCoords?.length === 2) {
-            params.append("destinationLng", String(destCoords[0]));
-            params.append("destinationLat", String(destCoords[1]));
-        }
         const usedDate = dateOverride !== undefined ? dateOverride : date;
-        if (usedDate) params.append("date", usedDate);
 
         try {
-            const res = await api.get(`/rides/search-dest?${params.toString()}`);
+            const resolvedOriginCoords = originCoords?.length === 2
+                ? originCoords
+                : origin.trim()
+                ? await resolveCoordsWithProviders(origin.trim())
+                : null;
+            const resolvedDestinationCoords = destCoords?.length === 2
+                ? destCoords
+                : destVal
+                ? await resolveCoordsWithProviders(destVal)
+                : null;
 
-            // Log raw shape so we can verify the response structure
-            console.log('[FindRide] /rides/offers raw:', JSON.stringify(res.data).slice(0, 500));
+            if (resolvedOriginCoords?.length === 2) setOriginCoords(resolvedOriginCoords);
+            if (resolvedDestinationCoords?.length === 2) setDestCoords(resolvedDestinationCoords);
 
-            const found = normalizeRides(res.data);
+            const res = await api.get("/rides/offers");
+            const allRides = normalizeRides(res.data);
+            const found = filterManualSearchResults(allRides, {
+                originText: origin.trim(),
+                destinationText: destVal,
+                originCoordsValue: resolvedOriginCoords,
+                destinationCoordsValue: resolvedDestinationCoords,
+                dateValue: usedDate,
+            });
 
             setRides(found);
             if (found.length > 0) {
                 setSelected(found[0]);
+                void enrichRideLabelsFromCoords(found);
                 toast.success(
                     `Found ${found.length} ride${found.length > 1 ? "s" : ""} to "${destVal}"!`,
                     { duration: 3000 }
@@ -896,7 +1327,7 @@ const FindRide = ({
         } finally {
             setSearching(false);
         }
-    }, [destination, origin, date, originCoords, destCoords]);
+    }, [destination, origin, date, originCoords, destCoords, filterManualSearchResults, enrichRideLabelsFromCoords]);
 
     // ── Auto-search from homepage query param ────────────────────────────────
     useEffect(() => {
@@ -912,6 +1343,27 @@ const FindRide = ({
 
     const executeBooking = async (seatsNeeded: number) => {
         if (!seatBookRide) return;
+
+        const bookingOrigin =
+            originCoords?.length === 2
+                ? {
+                    address: origin.trim(),
+                    coordinates: originCoords,
+                }
+                : null;
+        const bookingDestination =
+            destCoords?.length === 2
+                ? {
+                    address: destination.trim(),
+                    coordinates: destCoords,
+                }
+                : null;
+
+        if (!bookingOrigin || !bookingDestination) {
+            toast.error("Before booking, enter your pickup and drop-off above so the driver sees your exact route.");
+            return;
+        }
+
         setBookingLoading(true);
         setBookingId(seatBookRide._id);
         let createdBookingId: string | null = null;
@@ -920,18 +1372,15 @@ const FindRide = ({
             const res = await api.post("/rides/book-direct", {
                 offerId: seatBookRide._id,
                 seatsNeeded,
+                origin: bookingOrigin,
+                destination: bookingDestination,
             });
 
             createdBookingId = res.data?.data?.booking?._id || res.data?.data?.bookingId;
             if (!createdBookingId) throw new Error("Booking ID missing from response.");
 
             setBookedIds(prev => ({ ...prev, [seatBookRide._id]: true }));
-            setRides(prev => prev.map(r =>
-                r._id === seatBookRide._id
-                    ? { ...r, seatsAvailable: Math.max(0, r.seatsAvailable - seatsNeeded) }
-                    : r
-            ));
-            toast.success("Booking request saved. Riders and drivers settle the fare directly.");
+            toast.success("Booking request sent. Seats will only update after the driver accepts.");
             navigate("/dashboard?tab=rides");
             setSeatBookRide(null);
         } catch (err: any) {
@@ -955,9 +1404,23 @@ const FindRide = ({
     };
 
     const bookBtnState = (ride: RideResult) => {
-        if (bookedIds[ride._id]) return { label: "Requested ✓", disabled: true, cls: "bg-emerald-600 opacity-80" };
+        if (bookedIds[ride._id]) {
+            return {
+                label: "Pending Approval",
+                disabled: true,
+                cls: "bg-amber-500 text-white opacity-90",
+            };
+        }
         if (ride.seatsAvailable <= 0) return { label: "Seats Full", disabled: true, cls: "bg-muted-foreground/60 text-white" };
         return { label: "Book Seats", disabled: false, cls: "bg-gradient-primary shadow-glow" };
+    };
+
+    const handleDismissRide = (rideId: string) => {
+        setRides((prev) => {
+            const { nextRides, nextSelected } = dismissRideFromResults(prev, rideId, selected);
+            setSelected(nextSelected);
+            return nextRides;
+        });
     };
 
     const handleNearbyRides = () => {
@@ -976,6 +1439,7 @@ const FindRide = ({
                 setRides(found);
                 if (found.length > 0) {
                     setSelected(found[0]);
+                    void enrichRideLabelsFromCoords(found);
                     toast.success(`Found ${found.length} nearby ride${found.length > 1 ? "s" : ""}.`);
                     setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 250);
                 } else {
@@ -1003,11 +1467,12 @@ const FindRide = ({
                 return;
             }
 
-            const now = new Date();
-            const fallbackDate = now.toISOString().slice(0, 10);
+            const fallbackDate = todayLocal();
             const requestDate = date || fallbackDate;
-            const earliest = new Date(`${requestDate}T${earliestTime || "07:30"}:00`);
-            const latest = new Date(`${requestDate}T${latestTime || "08:30"}:00`);
+            const earliestIso = toIsoFromLocalDateTime(`${requestDate}T${earliestTime || "07:30"}`);
+            const latestIso = toIsoFromLocalDateTime(`${requestDate}T${latestTime || "08:30"}`);
+            const earliest = earliestIso ? new Date(earliestIso) : null;
+            const latest = latestIso ? new Date(latestIso) : null;
             if (Number.isNaN(earliest.getTime()) || Number.isNaN(latest.getTime()) || latest < earliest) {
                 toast.error("Please enter a valid earliest/latest departure window.");
                 return;
@@ -1018,8 +1483,8 @@ const FindRide = ({
                 destination: { lat: resolvedDestination[1], lng: resolvedDestination[0] },
                 originAddress: origin.trim(),
                 destinationAddress: destination.trim(),
-                earliestDeparture: earliest.toISOString(),
-                latestDeparture: latest.toISOString(),
+                earliestDeparture: earliestIso,
+                latestDeparture: latestIso,
                 seatsNeeded: Math.max(1, Number(requestSeatsInput || requestSeats || 1)) || 1,
                 maxPricePerSeat: maxFarePerSeat.trim() && Number(maxFarePerSeat) > 0 ? Number(maxFarePerSeat) : null,
                 currency: "PKR",
@@ -1103,16 +1568,17 @@ const FindRide = ({
                 <div className="mb-5 flex items-center justify-between gap-3">
                     <div>
                         <h2 className="text-lg font-semibold">Find your ride</h2>
+                        <p className="text-sm text-muted-foreground">Search by route, date, and departure window.</p>
                     </div>
-                    <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center">
-                        <Search className="w-5 h-5 text-primary" />
+                    <div className="hidden rounded-full border border-primary/15 bg-primary/5 px-3 py-1 text-[11px] font-semibold text-primary md:block">
+                        Smart matching
                     </div>
                 </div>
 
                 <form
                     id="find-ride-form"
                     onSubmit={e => { e.preventDefault(); executeSearch(); }}
-                    className="grid gap-3 md:grid-cols-2 xl:grid-cols-4"
+                    className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-4"
                 >
                     {/* Origin */}
                     <AddressInput
@@ -1152,15 +1618,12 @@ const FindRide = ({
 
                     {/* Date */}
                     <div>
-                        <input
-                            id="find-ride-date"
-                            type="date"
+                        <DateField
                             value={date}
-                            onChange={e => setDate(e.target.value)}
-                            min={new Date().toISOString().split("T")[0]}
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm
-                                       focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all
-                                       text-foreground"
+                            onChange={setDate}
+                            min={todayLocal()}
+                            placeholder="Select date"
+                            className="h-[52px] border border-border bg-muted/30 text-foreground"
                         />
                     </div>
 
@@ -1169,7 +1632,7 @@ const FindRide = ({
                         id="find-ride-submit"
                         type="submit"
                         disabled={searching}
-                        className="bg-gradient-primary text-white h-11 rounded-xl font-semibold shadow-glow hover:opacity-90 transition-opacity"
+                        className="h-[52px] bg-gradient-primary text-white rounded-xl font-semibold shadow-glow hover:opacity-90 transition-opacity"
                     >
                         {searching
                             ? <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Searching…</span>
@@ -1215,25 +1678,19 @@ const FindRide = ({
 
                 <div className="mt-3 grid sm:grid-cols-2 gap-3">
                     <div>
-                        <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground block mb-1.5">
-                            Earliest Departure
-                        </label>
-                        <input
-                            type="time"
+                        <TimeField
                             value={earliestTime}
-                            onChange={(e) => setEarliestTime(e.target.value)}
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            onChange={setEarliestTime}
+                            label="Earliest Departure"
+                            className="border border-border bg-muted/30 text-foreground"
                         />
                     </div>
                     <div>
-                        <label className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground block mb-1.5">
-                            Latest Departure
-                        </label>
-                        <input
-                            type="time"
+                        <TimeField
                             value={latestTime}
-                            onChange={(e) => setLatestTime(e.target.value)}
-                            className="w-full bg-muted/30 border border-border rounded-xl px-4 py-2.5 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none"
+                            onChange={setLatestTime}
+                            label="Latest Departure"
+                            className="border border-border bg-muted/30 text-foreground"
                         />
                     </div>
                 </div>
@@ -1470,8 +1927,8 @@ const FindRide = ({
                                             <label className="text-[10px] text-muted-foreground block mb-1.5">Earliest</label>
                                             <input
                                                 type="datetime-local"
-                                                value={editModal.request.earliestDeparture ? new Date(editModal.request.earliestDeparture).toISOString().slice(0, 16) : ''}
-                                                onChange={e => setEditModal(modal => ({ ...modal, request: { ...modal.request, earliestDeparture: new Date(e.target.value).toISOString() } }))}
+                                                value={toLocalDateTimeInputValue(editModal.request.earliestDeparture)}
+                                                onChange={e => setEditModal(modal => ({ ...modal, request: { ...modal.request, earliestDeparture: toIsoFromLocalDateTime(e.target.value) } }))}
                                                 className="w-full bg-muted/30 border border-border rounded-xl px-3 py-2.5 text-xs focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-foreground"
                                             />
                                         </div>
@@ -1479,8 +1936,8 @@ const FindRide = ({
                                             <label className="text-[10px] text-muted-foreground block mb-1.5">Latest</label>
                                             <input
                                                 type="datetime-local"
-                                                value={editModal.request.latestDeparture ? new Date(editModal.request.latestDeparture).toISOString().slice(0, 16) : ''}
-                                                onChange={e => setEditModal(modal => ({ ...modal, request: { ...modal.request, latestDeparture: new Date(e.target.value).toISOString() } }))}
+                                                value={toLocalDateTimeInputValue(editModal.request.latestDeparture)}
+                                                onChange={e => setEditModal(modal => ({ ...modal, request: { ...modal.request, latestDeparture: toIsoFromLocalDateTime(e.target.value) } }))}
                                                 className="w-full bg-muted/30 border border-border rounded-xl px-3 py-2.5 text-xs focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all text-foreground"
                                             />
                                         </div>
@@ -1695,11 +2152,23 @@ const FindRide = ({
                                         transition={{ delay: i * 0.06 }}
                                         onClick={() => setSelected(ride)}
                                         id={`ride-card-${i}`}
-                                        className={`p-4 rounded-2xl border cursor-pointer transition-all ${isSelected
+                                        className={`relative p-4 rounded-2xl border cursor-pointer transition-all ${isSelected
                                             ? "bg-primary/5 border-primary shadow-md shadow-primary/10"
                                             : "bg-card border-border/40 hover:border-primary/30"}
                                         `}
                                     >
+                                        <button
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDismissRide(ride._id);
+                                            }}
+                                            className="absolute right-3 top-3 rounded-full border border-border/50 bg-background/85 p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                            aria-label="Remove this offer"
+                                            title="Remove this offer"
+                                        >
+                                            <X className="w-3.5 h-3.5" />
+                                        </button>
                                         <div className="flex gap-3.5">
                                             {/* Avatar */}
                                             <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/10 flex items-center justify-center shrink-0 overflow-hidden">
@@ -1767,8 +2236,8 @@ const FindRide = ({
                                                             </span>
                                                         )}
                                                         {bookedIds[ride._id] && (
-                                                            <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400">
-                                                                <CheckCircle2 className="w-3 h-3" /> Requested
+                                                            <span className="flex items-center gap-1 text-[10px] font-bold text-amber-500">
+                                                                <CheckCircle2 className="w-3 h-3" /> Pending approval
                                                             </span>
                                                         )}
                                                     </div>
@@ -1836,29 +2305,46 @@ const FindRide = ({
                                 exit={{ opacity: 0, scale: 0.97 }} transition={{ duration: 0.18 }}
                                 className="bg-card rounded-2xl border border-border/50 overflow-hidden"
                             >
-                                {/* Map */}
-                                <div className="h-72 relative overflow-hidden">
-                                    <LeafletMap
-                                        origin={selected.originCoords
-                                            ? { lat: selected.originCoords[1], lng: selected.originCoords[0] }
-                                            : undefined}
-                                        destination={selected.destinationCoords
-                                            ? { lat: selected.destinationCoords[1], lng: selected.destinationCoords[0] }
-                                            : undefined}
-                                        routeCoords={
-                                            selected.originCoords && selected.destinationCoords
-                                                ? [[selected.originCoords[1], selected.originCoords[0]],
-                                                [selected.destinationCoords[1], selected.destinationCoords[0]]]
-                                                : undefined
-                                        }
-                                    />
-                                    <div className="absolute top-3 left-3 right-3 flex justify-between pointer-events-none">
-                                        <span className="bg-background/80 backdrop-blur text-[11px] px-3 py-1.5 rounded-xl border border-border font-bold shadow">Route Map</span>
-                                        <span className={`px-3 py-1.5 rounded-xl text-[11px] font-bold shadow text-white uppercase ${selected.status === "active" ? "bg-red-500" : "bg-emerald-600"}`}>
-                                            {selected.status}
-                                        </span>
-                                    </div>
-                                </div>
+                                {(() => {
+                                    const normalizedRouteCoords =
+                                        Array.isArray(selected.routeCoords) && selected.routeCoords.length > 1
+                                            ? selected.routeCoords
+                                                .map((point) => coerceLngLat(point))
+                                                .filter((point): point is [number, number] => Array.isArray(point) && point.length === 2)
+                                                .map((point) => [Number(point[1]), Number(point[0])] as [number, number])
+                                                .filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]))
+                                            : [];
+                                    const routeOrigin = normalizedRouteCoords[0];
+                                    const routeDestination = normalizedRouteCoords[normalizedRouteCoords.length - 1];
+                                    const fallbackOrigin = selected.originCoords
+                                        ? ([selected.originCoords[1], selected.originCoords[0]] as [number, number])
+                                        : undefined;
+                                    const fallbackDestination = selected.destinationCoords
+                                        ? ([selected.destinationCoords[1], selected.destinationCoords[0]] as [number, number])
+                                        : undefined;
+                                    const mapOrigin = normalizeLatLngPoint(fallbackOrigin || routeOrigin);
+                                    const mapDestination = normalizeLatLngPoint(fallbackDestination || routeDestination);
+
+                                    return (
+                                        <div className="h-72 relative overflow-hidden">
+                                            <LeafletMap
+                                                origin={mapOrigin ? { lat: mapOrigin[0], lng: mapOrigin[1] } : undefined}
+                                                destination={mapDestination ? { lat: mapDestination[0], lng: mapDestination[1] } : undefined}
+                                                routeCoords={
+                                                    normalizedRouteCoords.length > 2
+                                                        ? normalizedRouteCoords
+                                                        : undefined
+                                                }
+                                            />
+                                            <div className="absolute top-3 left-3 right-3 flex justify-between pointer-events-none">
+                                                <span className="bg-background/80 backdrop-blur text-[11px] px-3 py-1.5 rounded-xl border border-border font-bold shadow">Route Map</span>
+                                                <span className={`px-3 py-1.5 rounded-xl text-[11px] font-bold shadow text-white uppercase ${selected.status === "active" ? "bg-red-500" : "bg-emerald-600"}`}>
+                                                    {selected.status}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* Detail panel */}
                                 <div className="p-5">

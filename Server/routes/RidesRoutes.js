@@ -5,7 +5,8 @@ const {
   searchByDestination,
   bookDirectRide,
   searchAddressSuggestions,
-  resolveAddressSuggestion
+  resolveAddressSuggestion,
+  completeRide
 } = require('../controllers/CompatRidesController');
 const { getActiveRide, getPublicTrackingRide, optimizeMatchedRide } = require('../controllers/RidesController');
 const { protect } = require('../middleware/authMiddleware');
@@ -33,5 +34,8 @@ router.get('/address-resolve', resolveAddressSuggestion);
 
 // POST /api/rides/book-direct - Book a ride directly
 router.post('/book-direct', protect, bookDirectRide);
+
+// PUT /api/rides/offers/:id/complete - Complete a live ride
+router.put('/offers/:id/complete', protect, completeRide);
 
 module.exports = router;

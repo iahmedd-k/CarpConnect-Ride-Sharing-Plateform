@@ -82,10 +82,12 @@ export function TimeField({
             </span>
           )}
           <span className="flex items-center justify-between gap-3">
-            <span className={cn("text-sm font-semibold", value ? "text-foreground" : "text-muted-foreground")}>
+            <span className={cn("text-sm font-semibold leading-none", value ? "text-foreground" : "text-muted-foreground")}>
               {value ? formatDisplay(value) : placeholder}
             </span>
-            <Clock3 className="h-4 w-4 text-muted-foreground" />
+            <span className="flex h-4 w-4 items-center justify-center text-muted-foreground">
+              <Clock3 className="h-4 w-4" />
+            </span>
           </span>
         </button>
       </PopoverTrigger>

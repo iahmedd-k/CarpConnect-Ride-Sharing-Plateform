@@ -56,6 +56,20 @@ const getOfferDriverId = (offer: any) => String(
     ""
 );
 
+const isCoordinateLikeText = (value?: string) => {
+    const text = String(value || "").trim();
+    if (!text) return false;
+    return /^-?\d+(?:\.\d+)?\s*[, ]\s*-?\d+(?:\.\d+)?$/.test(text);
+};
+
+const readableOfferAddress = (primary?: string, fallback?: string) => {
+    const first = String(primary || "").trim();
+    if (first && !isCoordinateLikeText(first)) return first;
+    const second = String(fallback || "").trim();
+    if (second && !isCoordinateLikeText(second)) return second;
+    return "";
+};
+
 function StatusBadge({ status }: { status: string }) {
     const cfg = STATUS[normalizeOfferStatus(status)] || STATUS.cancelled;
     const Icon = cfg.icon;
@@ -69,6 +83,9 @@ function StatusBadge({ status }: { status: string }) {
 
 // ── Detail modal ────────────────────────────────────────────────────────────
 function OfferDetail({ offer, bookings, onClose }: { offer: any; bookings: any[]; onClose: () => void }) {
+    const originLabel = readableOfferAddress(offer.origin?.address, bookings[0]?.request?.originAddress);
+    const destinationLabel = readableOfferAddress(offer.destination?.address, bookings[0]?.request?.destinationAddress);
+
     return (
         <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -90,9 +107,9 @@ function OfferDetail({ offer, bookings, onClose }: { offer: any; bookings: any[]
                     <div className="flex items-start gap-3 bg-muted/20 rounded-2xl p-4">
                         <Navigation className="w-4 h-4 text-primary mt-0.5 shrink-0" />
                         <div>
-                            <div className="text-sm font-bold">{offer.origin?.address}</div>
+                            <div className="text-sm font-bold">{originLabel || "—"}</div>
                             <div className="text-xs text-muted-foreground my-1">→</div>
-                            <div className="text-sm font-bold text-primary">{offer.destination?.address}</div>
+                            <div className="text-sm font-bold text-primary">{destinationLabel || "—"}</div>
                         </div>
                     </div>
 
@@ -405,6 +422,8 @@ const RideHistory = () => {
                             <tbody>
                                 {paged.map((offer, i) => {
                                     const bkgs = bookingsMap[offer._id] || [];
+                                    const originLabel = readableOfferAddress(offer.origin?.address, bkgs[0]?.request?.originAddress);
+                                    const destinationLabel = readableOfferAddress(offer.destination?.address, bkgs[0]?.request?.destinationAddress);
                                     const pax = fmt.passengers(bkgs);
                                     const earned = fmt.earnings(bkgs);
                                     return (
@@ -426,12 +445,12 @@ const RideHistory = () => {
                                             <td className="px-5 py-4">
                                                 <div className="flex items-center gap-1.5 text-xs">
                                                     <MapPin className="w-3 h-3 text-muted-foreground/50 shrink-0" />
-                                                    <span className="truncate max-w-[90px] font-medium" title={offer.origin?.address}>
-                                                        {fmt.addr(offer.origin?.address)}
+                                                    <span className="truncate max-w-[90px] font-medium" title={originLabel}>
+                                                        {fmt.addr(originLabel)}
                                                     </span>
                                                     <span className="text-muted-foreground">→</span>
-                                                    <span className="truncate max-w-[90px] font-medium text-primary" title={offer.destination?.address}>
-                                                        {fmt.addr(offer.destination?.address)}
+                                                    <span className="truncate max-w-[90px] font-medium text-primary" title={destinationLabel}>
+                                                        {fmt.addr(destinationLabel)}
                                                     </span>
                                                 </div>
                                             </td>

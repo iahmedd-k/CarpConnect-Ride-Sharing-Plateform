@@ -1,6 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const mongoose = require('mongoose');
 const RideOffer = require('../models/RideOffer');
+const RideRequest = require('../models/RideRequest');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Match = require('../models/MatchModels');
@@ -21,7 +22,9 @@ const {
   assertUsageAllowed
 } = require('../utils/subscriptionUsage');
 const { lockChatRoomForRide } = require('../utils/chatRooms');
+const { ensureChatRoomForRide, getRideParticipants } = require('../utils/chatRooms');
 const { materializeOfferOccurrence } = require('../utils/recurringJobs');
+const { setRideSnapshot, getRideSnapshot } = require('../utils/rideSnapshotCache');
 
 const PAKISTAN_VIEWBOX = '60.85,37.12,77.84,23.63';
 const PAKISTAN_FALLBACK_SUGGESTIONS = [
@@ -48,6 +51,43 @@ const LOCATION_HINTS = [
   { pattern: /\b(satellite\s*town|bahria\s*town)\b/i, expansions: ['Rawalpindi, Pakistan', 'Islamabad, Pakistan'] },
   { pattern: /\bdha\b/i, expansions: ['Lahore, Pakistan', 'Karachi, Pakistan', 'Islamabad, Pakistan'] }
 ];
+const SEARCH_MATCH_RADIUS_METERS = 3000;
+const ACTIVE_BOOKING_STATUSES = ['confirmed', 'picked_up', 'live'];
+
+const withEffectiveSeatAvailability = async (offers) => {
+  const normalizedOffers = Array.isArray(offers) ? offers : [];
+  if (!normalizedOffers.length) return [];
+
+  const offerIds = normalizedOffers.map((offer) => offer?._id).filter(Boolean);
+  const bookings = await Booking.find({
+    offerId: { $in: offerIds },
+    status: { $in: ACTIVE_BOOKING_STATUSES }
+  })
+    .select('offerId seatCount')
+    .lean();
+
+  const bookedSeatsByOffer = bookings.reduce((acc, booking) => {
+    const offerId = String(booking.offerId || '');
+    if (!offerId) return acc;
+    acc[offerId] = (acc[offerId] || 0) + Math.max(1, Number(booking.seatCount || 1));
+    return acc;
+  }, {});
+
+  return normalizedOffers.map((offer) => {
+    const totalSeats = Math.max(
+      1,
+      Number(offer?.seatsTotal || offer?.seatsAvailable || 1)
+    );
+    const bookedSeats = Number(bookedSeatsByOffer[String(offer?._id || '')] || 0);
+    const effectiveSeatsAvailable = Math.max(0, totalSeats - bookedSeats);
+
+    return {
+      ...offer,
+      seatsTotal: totalSeats,
+      seatsAvailable: effectiveSeatsAvailable
+    };
+  });
+};
 
 // @desc    Create a new ride offer
 // @route   POST /api/rides/offers
@@ -127,6 +167,7 @@ const createRideOffer = asyncHandler(async (req, res) => {
     recurrencePattern,
     createdAt: new Date()
   });
+  setRideSnapshot(offer);
 
   // Emit real-time event for matching
   req.io?.to(`driver:${req.user._id}`).emit('offerCreated', offer);
@@ -157,11 +198,10 @@ const getRideOffers = asyncHandler(async (req, res) => {
   if (status) {
     query.status = mapOfferStatusFromApi(String(status));
   } else {
-    query.status = { $in: ['open', 'active', 'completed', 'cancelled'] };
-  }
-
-  if (req.user && (req.user.role === 'driver' || req.user.role === 'both')) {
-    query.driverId = req.user._id;
+    // Search results should stay rider-facing by default: include any pre-start offer,
+    // then reconcile stale status values after effective seat calculation.
+    query.status = { $in: ['open', 'matched', 'booked', 'active'] };
+    query.departureTime = { $gte: new Date() };
   }
 
   if (hasLocationFilter) {
@@ -202,8 +242,41 @@ const getRideOffers = asyncHandler(async (req, res) => {
     });
   }
 
-  const drivers = await getDriverMap(offers);
-  const shaped = offers.map((offer) => toOfferResponse(offer, drivers.get(String(offer.driverId))));
+  const offersWithEffectiveSeats = await withEffectiveSeatAvailability(offers);
+  const normalizedOffers = offersWithEffectiveSeats.map((offer) => {
+    const rawStatus = String(offer?.status || '').toLowerCase();
+    const departure = offer?.departureTime ? new Date(offer.departureTime) : null;
+    const hasFutureDeparture = departure && !Number.isNaN(departure.getTime()) && departure >= new Date();
+
+    if (
+      Number(offer?.seatsAvailable || 0) > 0 &&
+      !offer?.startedAt &&
+      !offer?.completedAt &&
+      hasFutureDeparture &&
+      ['active', 'matched', 'booked'].includes(rawStatus)
+    ) {
+      return { ...offer, status: 'open' };
+    }
+
+    return offer;
+  });
+
+  const drivers = await getDriverMap(normalizedOffers);
+  const shaped = normalizedOffers
+    .filter((offer) => {
+      const rawStatus = String(offer?.status || '').toLowerCase();
+      if (Number(offer?.seatsAvailable || 0) <= 0) return false;
+      if (!status) {
+        const departure = offer?.departureTime ? new Date(offer.departureTime) : null;
+        if (!departure || Number.isNaN(departure.getTime()) || departure < new Date()) {
+          return false;
+        }
+        if (offer?.completedAt) return false;
+        if (!['open', 'matched', 'booked', 'active'].includes(rawStatus)) return false;
+      }
+      return true;
+    })
+    .map((offer) => toOfferResponse(offer, drivers.get(String(offer.driverId))));
 
   res.status(200).json({ 
     success: true, 
@@ -449,8 +522,26 @@ const searchByDestination = asyncHandler(async (req, res) => {
   const originLng = Number(req.query.originLng);
   const destinationLat = Number(req.query.destinationLat);
   const destinationLng = Number(req.query.destinationLng);
-  const originRadiusMeters = 3000;
-  const destinationRadiusMeters = 4000;
+  const originRadiusMeters = SEARCH_MATCH_RADIUS_METERS;
+  const destinationRadiusMeters = SEARCH_MATCH_RADIUS_METERS;
+  const resolvedOriginCoords =
+    Number.isFinite(originLat) && Number.isFinite(originLng)
+      ? [originLng, originLat]
+      : await resolveAddressPoint(null, origin, 'origin');
+  const resolvedDestinationCoords =
+    Number.isFinite(destinationLat) && Number.isFinite(destinationLng)
+      ? [destinationLng, destinationLat]
+      : await resolveAddressPoint(null, destination, 'destination');
+  const hasResolvedOriginCoords =
+    Array.isArray(resolvedOriginCoords) &&
+    resolvedOriginCoords.length === 2 &&
+    Number.isFinite(Number(resolvedOriginCoords[0])) &&
+    Number.isFinite(Number(resolvedOriginCoords[1]));
+  const hasResolvedDestinationCoords =
+    Array.isArray(resolvedDestinationCoords) &&
+    resolvedDestinationCoords.length === 2 &&
+    Number.isFinite(Number(resolvedDestinationCoords[0])) &&
+    Number.isFinite(Number(resolvedDestinationCoords[1]));
 
   const now = new Date();
   const query = {
@@ -459,11 +550,11 @@ const searchByDestination = asyncHandler(async (req, res) => {
     departureTime: { $gte: now }
   };
 
-  if (destination && !(Number.isFinite(destinationLat) && Number.isFinite(destinationLng))) {
+  if (destination && !hasResolvedDestinationCoords) {
     query.destinationAddress = new RegExp(destination, 'i');
   }
 
-  if (origin && !(Number.isFinite(originLat) && Number.isFinite(originLng))) {
+  if (origin && !hasResolvedOriginCoords) {
     query.originAddress = new RegExp(origin, 'i');
   }
 
@@ -503,7 +594,7 @@ const searchByDestination = asyncHandler(async (req, res) => {
   let offers = await RideOffer.find(query).sort({ departureTime: 1 }).limit(150);
   offers = offers.filter((offer) => !offer.startedAt && !offer.completedAt);
 
-  if ((Number.isFinite(originLat) && Number.isFinite(originLng)) || (Number.isFinite(destinationLat) && Number.isFinite(destinationLng))) {
+  if (hasResolvedOriginCoords || hasResolvedDestinationCoords) {
     offers = offers.filter((offer) => {
       let matchesOrigin = true;
       let matchesDestination = true;
@@ -511,13 +602,23 @@ const searchByDestination = asyncHandler(async (req, res) => {
       const offerOriginCoords = offer?.origin?.coordinates;
       const offerDestinationCoords = offer?.destination?.coordinates;
 
-      if (Number.isFinite(originLat) && Number.isFinite(originLng) && Array.isArray(offerOriginCoords) && offerOriginCoords.length === 2) {
-        const distanceFromOrigin = haversineDistanceMeters(originLat, originLng, Number(offerOriginCoords[1]), Number(offerOriginCoords[0]));
+      if (hasResolvedOriginCoords && Array.isArray(offerOriginCoords) && offerOriginCoords.length === 2) {
+        const distanceFromOrigin = haversineDistanceMeters(
+          Number(resolvedOriginCoords[1]),
+          Number(resolvedOriginCoords[0]),
+          Number(offerOriginCoords[1]),
+          Number(offerOriginCoords[0])
+        );
         matchesOrigin = distanceFromOrigin <= originRadiusMeters;
       }
 
-      if (Number.isFinite(destinationLat) && Number.isFinite(destinationLng) && Array.isArray(offerDestinationCoords) && offerDestinationCoords.length === 2) {
-        const distanceFromDestination = haversineDistanceMeters(destinationLat, destinationLng, Number(offerDestinationCoords[1]), Number(offerDestinationCoords[0]));
+      if (hasResolvedDestinationCoords && Array.isArray(offerDestinationCoords) && offerDestinationCoords.length === 2) {
+        const distanceFromDestination = haversineDistanceMeters(
+          Number(resolvedDestinationCoords[1]),
+          Number(resolvedDestinationCoords[0]),
+          Number(offerDestinationCoords[1]),
+          Number(offerDestinationCoords[0])
+        );
         matchesDestination = distanceFromDestination <= destinationRadiusMeters;
       }
 
@@ -533,12 +634,22 @@ const searchByDestination = asyncHandler(async (req, res) => {
 
     const scoreOffer = (offerOrigin, offerDestination, departureTime) => {
       let score = 0;
-      if (Number.isFinite(originLat) && Number.isFinite(originLng) && Array.isArray(offerOrigin) && offerOrigin.length === 2) {
-        const distance = haversineDistanceMeters(originLat, originLng, Number(offerOrigin[1]), Number(offerOrigin[0]));
+      if (hasResolvedOriginCoords && Array.isArray(offerOrigin) && offerOrigin.length === 2) {
+        const distance = haversineDistanceMeters(
+          Number(resolvedOriginCoords[1]),
+          Number(resolvedOriginCoords[0]),
+          Number(offerOrigin[1]),
+          Number(offerOrigin[0])
+        );
         score += Math.min(distance, originRadiusMeters * 2);
       }
-      if (Number.isFinite(destinationLat) && Number.isFinite(destinationLng) && Array.isArray(offerDestination) && offerDestination.length === 2) {
-        const distance = haversineDistanceMeters(destinationLat, destinationLng, Number(offerDestination[1]), Number(offerDestination[0]));
+      if (hasResolvedDestinationCoords && Array.isArray(offerDestination) && offerDestination.length === 2) {
+        const distance = haversineDistanceMeters(
+          Number(resolvedDestinationCoords[1]),
+          Number(resolvedDestinationCoords[0]),
+          Number(offerDestination[1]),
+          Number(offerDestination[0])
+        );
         score += Math.min(distance, destinationRadiusMeters * 2);
       }
       score += Math.max(0, new Date(departureTime).getTime() - Date.now()) / (60 * 1000);
@@ -547,17 +658,20 @@ const searchByDestination = asyncHandler(async (req, res) => {
 
     return scoreOffer(aOriginCoords, aDestinationCoords, a.departureTime) - scoreOffer(bOriginCoords, bDestinationCoords, b.departureTime);
   });
-  const drivers = await getDriverMap(offers);
-  const rides = offers.map((offer) => {
+  const offersWithEffectiveSeats = await withEffectiveSeatAvailability(offers);
+  const drivers = await getDriverMap(offersWithEffectiveSeats);
+  const rides = offersWithEffectiveSeats.map((offer) => {
+    const snapshot = getRideSnapshot(offer._id);
     const shaped = toOfferResponse(offer, drivers.get(String(offer.driverId)));
     return {
       _id: shaped._id,
       id: shaped._id,
       origin: shaped.origin.address,
       destination: shaped.destination.address,
-      originCoords: shaped.origin.point.coordinates,
-      destinationCoords: shaped.destination.point.coordinates,
-      departureTime: shaped.departureTime,
+      originCoords: shaped.origin.point.coordinates || snapshot?.originCoords || null,
+      destinationCoords: shaped.destination.point.coordinates || snapshot?.destinationCoords || null,
+      routeCoords: offer.routeGeoJson?.geometry?.coordinates || offer.routeGeoJson?.coordinates || snapshot?.routeCoords || null,
+      departureTime: shaped.departureTime || snapshot?.departureTime || null,
       pricePerSeat: shaped.pricePerSeat,
       currency: shaped.currency,
       seatsAvailable: shaped.seatsAvailable,
@@ -582,7 +696,7 @@ const searchByDestination = asyncHandler(async (req, res) => {
 // @route   POST /api/rides/book-direct
 // @access  Private (Rider only)
 const bookDirectRide = asyncHandler(async (req, res) => {
-  const { offerId, seatsNeeded = 1 } = req.body;
+  const { offerId, seatsNeeded = 1, origin, destination } = req.body;
 
   if (!offerId) {
     return res.status(400).json({ 
@@ -599,7 +713,13 @@ const bookDirectRide = asyncHandler(async (req, res) => {
     });
   }
 
-  if (!offer || offer.status !== 'open' || offer.seatsAvailable <= 0 || offer.startedAt || offer.completedAt) {
+  const normalizedOfferStatus = String(offer?.status || '').toLowerCase();
+  if (
+    !offer ||
+    ['cancelled', 'completed'].includes(normalizedOfferStatus) ||
+    offer.startedAt ||
+    offer.completedAt
+  ) {
     return res.status(409).json({
       success: false,
       message: 'This ride is no longer available for new bookings'
@@ -622,13 +742,6 @@ const bookDirectRide = asyncHandler(async (req, res) => {
     });
   }
 
-  if (offer.seatsAvailable < seats) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Not enough seats available' 
-    });
-  }
-
   const existing = await Booking.findOne({
     userId: req.user._id,
     offerId: offer._id,
@@ -643,25 +756,45 @@ const bookDirectRide = asyncHandler(async (req, res) => {
   }
 
   const totalFare = Number((offer.pricePerSeat || 0) * seats);
-  const pickupCoordinates = Array.isArray(offer?.origin?.coordinates) ? offer.origin.coordinates : [];
-  const dropoffCoordinates = Array.isArray(offer?.destination?.coordinates) ? offer.destination.coordinates : [];
+  const pickupCoordinates = Array.isArray(origin?.coordinates) ? origin.coordinates : [];
+  const dropoffCoordinates = Array.isArray(destination?.coordinates) ? destination.coordinates : [];
   const pickupTime = offer.departureTime ? new Date(offer.departureTime) : new Date();
   const dropoffTime = new Date(pickupTime.getTime() + 30 * 60 * 1000);
-  const dummyRequestId = new mongoose.Types.ObjectId();
 
   if (pickupCoordinates.length !== 2 || dropoffCoordinates.length !== 2) {
     return res.status(400).json({
       success: false,
-      message: 'Ride route coordinates are incomplete for this offer'
+      message: 'Pickup and drop-off are required before booking this ride'
     });
   }
 
   let match;
   let booking;
+  let rideRequest;
   try {
+    rideRequest = await RideRequest.create({
+      riderId: req.user._id,
+      origin: {
+        type: 'Point',
+        coordinates: pickupCoordinates
+      },
+      destination: {
+        type: 'Point',
+        coordinates: dropoffCoordinates
+      },
+      originAddress: String(origin?.address || '').trim(),
+      destinationAddress: String(destination?.address || '').trim(),
+      earliestDeparture: pickupTime,
+      latestDeparture: pickupTime,
+      groupSize: seats,
+      maxPricePerSeat: Number(offer.pricePerSeat || 0),
+      currency: offer.currency || 'PKR',
+      status: 'matched'
+    });
+
     match = await Match.create({
       offerId: offer._id,
-      requestId: dummyRequestId, // Required field, dummy value for direct booking
+      requestId: rideRequest._id,
       driverId: offer.driverId,
       riderIds: [req.user._id],
       pickupPoints: [{
@@ -709,6 +842,12 @@ const bookDirectRide = asyncHandler(async (req, res) => {
     match.bookingId = booking._id;
     await match.save();
 
+    rideRequest.matchId = match._id;
+    rideRequest.bookingId = booking._id;
+    await rideRequest.save();
+
+    // Keep the offer open and seat count unchanged until the driver manually accepts.
+    offer.status = 'open';
     await offer.save();
   } catch (error) {
     console.error('[bookDirectRide] failed', {

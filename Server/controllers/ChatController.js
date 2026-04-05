@@ -1,14 +1,41 @@
 const asyncHandler = require('express-async-handler');
 const ChatMessage = require('../models/ChatMessage');
+const Booking = require('../models/Booking');
 const {
   SYSTEM_SENDER,
   toMessagePayload,
   resolveChatRoomContext,
-  getChatParticipantsForRide
+  getChatParticipantsForRide,
+  ensureChatRoomForRide
 } = require('../utils/chatRooms');
 
 const getAuthorizedRoom = async (referenceId, userId) => {
-  const context = await resolveChatRoomContext(referenceId);
+  let context = await resolveChatRoomContext(referenceId);
+  const booking = await Booking.findById(referenceId).select('offerId userId driverId status').lean();
+
+  if (!context.found) {
+    if (booking && [String(booking.userId), String(booking.driverId)].includes(String(userId))) {
+      await ensureChatRoomForRide(booking.offerId, {
+        driverId: booking.driverId,
+        riderIds: [booking.userId]
+      });
+      context = await resolveChatRoomContext(referenceId);
+    }
+  }
+
+  if (
+    context.found &&
+    booking &&
+    [String(booking.userId), String(booking.driverId)].includes(String(userId)) &&
+    !context.participants.includes(String(userId))
+  ) {
+    await ensureChatRoomForRide(booking.offerId, {
+      driverId: booking.driverId,
+      riderIds: [booking.userId]
+    });
+    context = await resolveChatRoomContext(referenceId);
+  }
+
   if (!context.found) {
     return {
       ok: false,

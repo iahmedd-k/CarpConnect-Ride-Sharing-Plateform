@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Smartphone, ArrowRight, Star, Download } from "lucide-react";
+import { Smartphone, ArrowRight, Star, Download, Apple, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const AppDownload = () => {
@@ -23,29 +23,37 @@ const AppDownload = () => {
                         </p>
 
                         <div className="flex flex-col sm:flex-row gap-4 mb-10">
-                            {[
-                                { store: "App Store", sub: "Download on the", icon: "ðŸŽ" },
-                                { store: "Google Play", sub: "Get it on", icon: "â–¶" },
-                            ].map((app) => (
-                                <motion.button
-                                    key={app.store}
-                                    whileHover={{ scale: 1.03 }}
-                                    whileTap={{ scale: 0.98 }}
-                                    className="flex items-center gap-4 px-6 py-4 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 transition-all text-left"
-                                >
-                                    <span className="text-2xl">{app.icon}</span>
-                                    <div>
-                                        <div className="text-xs text-primary-foreground/50">{app.sub}</div>
-                                        <div className="text-base font-display font-bold text-primary-foreground">{app.store}</div>
-                                    </div>
-                                </motion.button>
-                            ))}
+                            {/* App Store Button */}
+                            <motion.button
+                                whileHover={{ scale: 1.03 }}
+                                whileTap={{ scale: 0.98 }}
+                                className="flex items-center gap-4 px-6 py-4 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 transition-all text-left"
+                            >
+                                <Apple className="w-7 h-7 text-white" />
+                                <div>
+                                    <div className="text-xs text-primary-foreground/50">Download on the</div>
+                                    <div className="text-base font-display font-bold text-primary-foreground">App Store</div>
+                                </div>
+                            </motion.button>
+
+                            {/* Google Play Button */}
+                            <motion.button
+                                whileHover={{ scale: 1.03 }}
+                                whileTap={{ scale: 0.98 }}
+                                className="flex items-center gap-4 px-6 py-4 rounded-2xl bg-white/10 border border-white/20 hover:bg-white/15 transition-all text-left"
+                            >
+                                <PlayCircle className="w-7 h-7 text-white" />
+                                <div>
+                                    <div className="text-xs text-primary-foreground/50">Get it on</div>
+                                    <div className="text-base font-display font-bold text-primary-foreground">Google Play</div>
+                                </div>
+                            </motion.button>
                         </div>
 
                         <div className="flex items-center gap-6">
                             <div className="flex items-center gap-1">
                                 {[...Array(5)].map((_, i) => (
-                                    <Star key={i} className="w-4 h-4 fill-amber text-amber" />
+                                    <Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />
                                 ))}
                                 <span className="text-sm text-primary-foreground/60 ml-2">4.9 (18K+ reviews)</span>
                             </div>
@@ -77,18 +85,23 @@ const AppDownload = () => {
                                     <div className="flex items-center justify-between px-6 pt-4 pb-2">
                                         <span className="text-[10px] text-white/50">9:41 AM</span>
                                         <div className="flex items-center gap-1">
-                                            <div className="w-4 h-2 border border-white/40 rounded-sm"><div className="h-full w-3/4 bg-primary rounded-sm" /></div>
+                                            <div className="w-4 h-2 border border-white/40 rounded-sm">
+                                                <div className="h-full w-3/4 bg-primary rounded-sm" />
+                                            </div>
                                         </div>
                                     </div>
+
                                     {/* App header */}
                                     <div className="px-5 py-3">
                                         <div className="text-xs text-white/40 mb-1">Good evening</div>
-                                        <div className="text-lg font-display font-bold text-white">Find Your Ride ðŸš—</div>
+                                        <div className="text-lg font-display font-bold text-white">Find Your Ride 🚗</div>
                                     </div>
 
                                     {/* Search box */}
                                     <div className="mx-4 mb-3 p-3 rounded-2xl bg-white/10 border border-white/10 flex items-center gap-2">
-                                        <div className="w-6 h-6 rounded-full bg-primary/30 flex items-center justify-center"><div className="w-2 h-2 rounded-full bg-primary" /></div>
+                                        <div className="w-6 h-6 rounded-full bg-primary/30 flex items-center justify-center">
+                                            <div className="w-2 h-2 rounded-full bg-primary" />
+                                        </div>
                                         <span className="text-xs text-white/60">Where to today?</span>
                                     </div>
 
@@ -108,7 +121,7 @@ const AppDownload = () => {
                                                 </div>
                                                 <div className="flex-1">
                                                     <div className="text-xs font-medium text-white">{dest}</div>
-                                                    <div className="text-[10px] text-white/40">{3 - i} seats Â· {8 + i * 3} min</div>
+                                                    <div className="text-[10px] text-white/40">{3 - i} seats · {8 + i * 3} min</div>
                                                 </div>
                                                 <div className="text-[10px] text-primary font-medium">${(2 + i * 1.5).toFixed(2)}</div>
                                             </motion.div>
@@ -117,8 +130,18 @@ const AppDownload = () => {
 
                                     {/* Bottom nav */}
                                     <div className="absolute bottom-4 left-0 right-0 flex justify-around px-6">
-                                        {["ðŸ ", "ðŸ—ºï¸", "ðŸ’¬", "ðŸ‘¤"].map((icon, i) => (
-                                            <div key={i} className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${i === 0 ? "bg-primary/20" : ""}`}>{icon}</div>
+                                        {[
+                                            { icon: "🏠", label: "home" },
+                                            { icon: "🗺️", label: "map" },
+                                            { icon: "💬", label: "chat" },
+                                            { icon: "👤", label: "profile" },
+                                        ].map((item, i) => (
+                                            <div
+                                                key={item.label}
+                                                className={`w-10 h-10 rounded-2xl flex items-center justify-center text-lg ${i === 0 ? "bg-primary/20" : ""}`}
+                                            >
+                                                {item.icon}
+                                            </div>
                                         ))}
                                     </div>
                                 </div>
@@ -127,16 +150,17 @@ const AppDownload = () => {
                                 <div className="absolute top-6 left-1/2 -translate-x-1/2 w-24 h-6 bg-foreground rounded-full" />
                             </motion.div>
 
-                            {/* Floating badges */}
+                            {/* Floating badge - rating */}
                             <motion.div
                                 animate={{ y: [0, -8, 0] }}
                                 transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
                                 className="absolute -right-8 top-20 glass-dark rounded-2xl px-4 py-3 border border-white/10"
                             >
-                                <div className="text-lg font-bold text-white">4.9â˜…</div>
+                                <div className="text-lg font-bold text-white">4.9 ⭐</div>
                                 <div className="text-[10px] text-white/50">App Store</div>
                             </motion.div>
 
+                            {/* Floating badge - downloads */}
                             <motion.div
                                 animate={{ y: [0, 8, 0] }}
                                 transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", delay: 1 }}

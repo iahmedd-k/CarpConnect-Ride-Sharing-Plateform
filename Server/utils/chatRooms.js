@@ -71,7 +71,7 @@ const getRideParticipants = async (rideId) => {
 
   const bookings = await Booking.find({
     offerId: rideId,
-    status: { $in: ['confirmed', 'picked_up', 'live', 'completed'] }
+    status: { $in: ['pending', 'confirmed', 'picked_up', 'live', 'completed'] }
   }).select('userId').lean();
 
   const riderIds = uniqObjectIds(bookings.map((booking) => booking.userId));

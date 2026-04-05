@@ -7,6 +7,7 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const Match = require('./models/MatchModels');
+const ChatMessage = require('./models/ChatMessage');
 const { calculatePointToRouteDistance } = require('./utils/geospatial');
 const { createAndEmitNotification } = require('./utils/notifications');
 const {
@@ -18,15 +19,39 @@ const { startRecurringJobs } = require('./utils/recurringJobs');
 // Load env vars
 dotenv.config();
 
-// Connect to database
-connectDB();
-
 const app = express();
 const server = http.createServer(app);
 
+const parseAllowedOrigins = () => {
+  const configuredOrigins = String(process.env.CLIENT_URLS || process.env.CLIENT_URL || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return new Set([
+    "https://carp-connect-ride-sharing-plateform.vercel.app",
+    "http://localhost:8080",
+    "http://localhost:3000",
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:3000",
+    ...configuredOrigins
+  ]);
+};
+
+const allowedOrigins = parseAllowedOrigins();
+const allowedOriginPatterns = [
+  /^https:\/\/.*\.vercel\.app$/i
+];
+
+const isOriginAllowed = (origin) => {
+  if (!origin) return true;
+  if (allowedOrigins.has(origin)) return true;
+  return allowedOriginPatterns.some((pattern) => pattern.test(origin));
+};
+
 const io = new Server(server, {
   cors: {
-     origin: true, // allows any origin
+    origin: true,
     credentials: true
   }
 });
@@ -97,7 +122,19 @@ io.on('connection', (socket) => {
       }
 
       socket.join(`chat:${context.rideId}`);
-      await createSystemChatMessage(context.rideId, `${socket.user.name || 'A rider'} joined the ride chat`, io);
+      const joinMessage = `${socket.user.name || 'A rider'} joined the ride chat`;
+      const existingJoinMessage = await ChatMessage.findOne({
+        rideId: context.rideId,
+        senderId: null,
+        type: 'system',
+        message: joinMessage
+      })
+        .select('_id')
+        .lean();
+
+      if (!existingJoinMessage) {
+        await createSystemChatMessage(context.rideId, joinMessage, io);
+      }
       callback?.({ ok: true, rideId: context.rideId, isLocked: Boolean(context.room?.isLocked) });
     } catch (error) {
       console.error('join:chat error', error);
@@ -113,14 +150,25 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('chat:send', ({ bookingId, content }) => {
-    if (!bookingId || !content || !socket.user?._id) return;
+  socket.on('chat:send', async ({ rideId, bookingId, content }) => {
+    if ((!bookingId && !rideId) || !content || !socket.user?._id) return;
 
-    io.to(`chat:${bookingId}`).emit('chat:message', {
+    const referenceId = rideId || bookingId;
+    const context = await resolveChatRoomContext(referenceId);
+    if (!context?.found) return;
+
+    io.to(`chat:${context.rideId}`).emit('chat:message', {
       _id: `tmp-${Date.now()}`,
+      rideId: context.rideId,
       bookingId,
       content,
       senderId: String(socket.user._id),
+      senderRole: socket.user.role || 'rider',
+      sender: {
+        _id: String(socket.user._id),
+        name: socket.user.name || 'User',
+        role: socket.user.role || 'rider'
+      },
       timestamp: new Date().toISOString(),
       status: 'delivered'
     });
@@ -207,25 +255,20 @@ app.use((req, res, next) => {
 });
 // Middleware
 app.use(express.json());
-const allowedOrigins = [
-  'https://carp-connect-ride-sharing-plateform.vercel.app',
-  'http://localhost:8080',
-  'http://localhost:3000'
-];
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // allow requests with no origin (like mobile apps, curl, etc.)
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        return callback(null, true);
-      } else {
-        return callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true
-  })
-);
+const corsOptions = {
+  origin(origin, callback) {
+    if (isOriginAllowed(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // Import routes
 const authRoutes = require('./routes/Authroutes');
@@ -269,5 +312,11 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-startRecurringJobs();
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+const bootstrap = async () => {
+  await connectDB();
+  startRecurringJobs();
+  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+};
+
+bootstrap();

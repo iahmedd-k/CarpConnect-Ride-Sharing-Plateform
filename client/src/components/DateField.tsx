@@ -58,10 +58,12 @@ export function DateField({
             </span>
           )}
           <span className="flex items-center justify-between gap-3">
-            <span className={cn("text-sm font-semibold", value ? "text-foreground" : "text-muted-foreground")}>
+            <span className={cn("text-sm font-semibold leading-none", value ? "text-foreground" : "text-muted-foreground")}>
               {selectedDate ? format(selectedDate, "dd MMM yyyy") : placeholder}
             </span>
-            <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+            <span className="flex h-4 w-4 items-center justify-center text-muted-foreground">
+              <CalendarIcon className="h-4 w-4" />
+            </span>
           </span>
         </button>
       </PopoverTrigger>

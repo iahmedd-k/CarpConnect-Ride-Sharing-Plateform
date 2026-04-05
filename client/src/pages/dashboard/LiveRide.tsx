@@ -4,7 +4,7 @@ import {
   MapPin, Navigation, Clock, ShieldCheck,
   AlertTriangle, Play, Square, CheckCircle,
   Loader2, Leaf, ArrowRight, User, Car,
-  MessageSquare, Users, RefreshCw,
+  MessageSquare, MessageCircle, Users, RefreshCw, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -13,6 +13,7 @@ import { io, Socket } from "socket.io-client";
 import { toast } from "sonner";
 import { useDriverTracking } from "@/hooks/useDriverTracking";
 import RouteOptimizationScreen from "@/components/RouteOptimizationScreen";
+import ChatScreen from "@/components/ChatScreen";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                           */
@@ -88,6 +89,7 @@ function BookingStatusRow({
   onGoLive,
   onComplete,
   onUpdate,
+  onChat,
 }: {
   booking: any;
   arrived: boolean;
@@ -96,6 +98,7 @@ function BookingStatusRow({
   onGoLive: () => void;
   onComplete: () => void;
   onUpdate: () => void;
+  onChat: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<void>) => {
@@ -148,12 +151,13 @@ function BookingStatusRow({
                 {primaryAction.label}
               </button>
             )}
-            <Link
-              to="/driver-dashboard?tab=messages"
-              className="text-xs px-2.5 py-1 rounded-xl border border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors"
+            <button
+              type="button"
+              onClick={onChat}
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-xl border border-gray-200 text-gray-600 font-semibold hover:bg-gray-50 transition-colors"
             >
-              Chat
-            </Link>
+              <MessageCircle size={12} /> Chat
+            </button>
           </>
         )}
       </div>
@@ -209,6 +213,62 @@ function RideSummaryModal({
             className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-bold">
             Done
           </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function RideChatModal({
+  rideId,
+  me,
+  title,
+  subtitle,
+  onClose,
+}: {
+  rideId?: string | null;
+  me?: any;
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <motion.div
+        initial={{ scale: 0.94, y: 20 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.94, y: 20 }}
+        className="w-full max-w-2xl overflow-hidden rounded-3xl border border-border/50 bg-card shadow-2xl"
+        style={{ height: "75vh", maxHeight: "720px" }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border bg-card px-5 py-4">
+          <div>
+            <h3 className="text-sm font-bold text-foreground">{title}</h3>
+            {subtitle ? <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p> : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl p-2 transition-colors hover:bg-muted/50"
+          >
+            <X className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
+        <div className="h-[calc(100%-73px)]">
+          <ChatScreen
+            rideId={rideId}
+            me={me}
+            title={title}
+            subtitle={subtitle}
+            participantsLabel="Live ride chat"
+          />
         </div>
       </motion.div>
     </motion.div>
@@ -281,9 +341,11 @@ const LiveRide = () => {
   const [eta,            setEta]            = useState<number | null>(null);
   const [speed,          setSpeed]          = useState(0);
   const [showSummary,    setShowSummary]    = useState(false);
+  const [showChat,       setShowChat]       = useState(false);
   const [summaryData,    setSummaryData]    = useState<any>(null);
   const [completedRideSnapshot, setCompletedRideSnapshot] = useState<any>(null);
   const [optimizingDecision, setOptimizingDecision] = useState(false);
+  const [me,            setMe]             = useState<any>(null);
   const socketRef  = useRef<Socket | null>(null);
   const trackingRideId = activeRide?._id || completedRideSnapshot?._id || null;
   const { error: trackingError, publishLocation } = useDriverTracking({
@@ -301,6 +363,11 @@ const LiveRide = () => {
       });
     },
   });
+
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem("carpconnect_user") || "{}");
+    setMe(user);
+  }, []);
 
   useEffect(() => {
     if (trackingError) {
@@ -436,13 +503,19 @@ const LiveRide = () => {
     await fetchActiveRide();
   };
 
-  const handleEndRide = async () => {
+  const handleCompleteRide = async () => {
     try {
       const openRideBookings = bookings.filter((b: any) => ["confirmed", "picked_up", "live"].includes(b.status));
       if (openRideBookings.length > 0) {
-        toast.error("Complete all rider drop-offs before ending this service.");
+        toast.error("Complete all rider drop-offs before completing this ride.");
         return;
       }
+      if (!activeRide?._id) {
+        toast.error("Active ride is missing. Please refresh and try again.");
+        return;
+      }
+
+      await api.put(`/rides/offers/${activeRide._id}/complete`);
       setCompletedRideSnapshot(activeRide);
       setRideStatus("completed");
       try {
@@ -453,8 +526,9 @@ const LiveRide = () => {
       setBookings([]);
       setArrivedBookings({});
       setShowSummary(true);
+      toast.success("Ride completed successfully.");
     } catch (error: any) {
-      toast.error(extractApiError(error, "Failed to end ride."));
+      toast.error(extractApiError(error, "Failed to complete ride."));
     }
   };
 
@@ -605,7 +679,7 @@ const LiveRide = () => {
   const pendingPickupCount = rideBookings.filter((booking: any) => booking.status === "confirmed").length;
   const activeOnboardCount = rideBookings.filter((booking: any) => ["picked_up", "live"].includes(booking.status)).length;
   const canStartRide = pickedUpCount > 0 && pendingPickupCount === 0 && rideStatus === "ready";
-  const canEndService = rideBookings.length > 0 && rideBookings.every((booking: any) => ["completed", "cancelled"].includes(booking.status));
+  const canCompleteRide = rideBookings.length > 0 && rideBookings.every((booking: any) => ["completed", "cancelled"].includes(booking.status));
 
   const shareLiveTrip = async () => {
     if (!activeRide) return;
@@ -807,20 +881,20 @@ const LiveRide = () => {
                   <Navigation size={13} /> Simulate Drive
                 </Button>
                 <Button
-                  onClick={handleEndRide}
-                  disabled={!canEndService}
+                  onClick={handleCompleteRide}
+                  disabled={!canCompleteRide}
                   className="w-full h-10 bg-red-500 hover:bg-red-600 disabled:bg-red-200 text-white font-semibold rounded-2xl gap-2"
                 >
-                  <Square size={12} className="fill-current" /> End Service
+                  <CheckCircle size={12} className="fill-current" /> Complete Ride
                 </Button>
               </div>
               <div className="rounded-2xl bg-gray-50 border border-gray-100 p-3 text-xs text-gray-500">
-                Use rider action buttons for arrival, pickup, live, and drop-off. End Service only appears after all riders are completed or cancelled.
+                Use rider action buttons for arrival, pickup, live, and drop-off. Complete Ride becomes available after all riders are dropped off or cancelled.
               </div>
               {rideStatus === "completed" && (
                 <div className="text-center py-2">
                   <CheckCircle size={28} className="text-emerald-500 mx-auto mb-2" />
-                  <p className="text-sm font-bold text-gray-700">Ride service completed successfully</p>
+                  <p className="text-sm font-bold text-gray-700">Ride completed successfully</p>
                 </div>
               )}
             </div>
@@ -864,6 +938,7 @@ const LiveRide = () => {
                   onGoLive={() => handleGoLive(b)}
                   onComplete={() => handleDropoff(b)}
                   onUpdate={fetchActiveRide}
+                  onChat={() => setShowChat(true)}
                 />
               ))
             )}
@@ -897,11 +972,9 @@ const LiveRide = () => {
               >
                 <ShieldCheck size={13} /> Share Live
               </Button>
-              <Link to="/driver-dashboard?tab=messages">
-                <Button variant="outline" className="rounded-xl h-9 text-xs font-semibold gap-2">
-                  <MessageSquare size={13} /> Messages
-                </Button>
-              </Link>
+              <Button variant="outline" onClick={() => setShowChat(true)} className="rounded-xl h-9 text-xs font-semibold gap-2">
+                <MessageCircle size={13} /> Ride Chat
+              </Button>
               <Button
                 variant="outline"
                 onClick={triggerEmergency}
@@ -963,6 +1036,18 @@ const LiveRide = () => {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showChat && (
+          <RideChatModal
+            rideId={activeRide?._id || completedRideSnapshot?._id || null}
+            me={me}
+            title="Live Ride Chat"
+            subtitle={activeRide ? `${addrFrom(activeRide.origin)} → ${addrFrom(activeRide.destination)}` : "Coordinate with riders in real time."}
+            onClose={() => setShowChat(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

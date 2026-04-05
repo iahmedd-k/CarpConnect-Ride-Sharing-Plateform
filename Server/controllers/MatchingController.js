@@ -8,6 +8,9 @@ const { calculateFare, splitFare, calculateEmissionsSavings } = require('../util
 const asyncHandler = require('express-async-handler');
 const { createAndEmitNotification } = require('../utils/notifications');
 const { optimizeMatchRoute } = require('../services/routeOptimization');
+const { ensureChatRoomForRide, getRideParticipants } = require('../utils/chatRooms');
+const MATCH_LOCATION_TOLERANCE_METERS = 3000;
+const MATCH_TIME_MARGIN_MINUTES = 120;
 
 const extractCoordinates = (value) => {
   const candidates = [
@@ -55,7 +58,9 @@ const isOfferCompatibleWithRequest = (offer, request) => {
   const offerDeparture = new Date(offer?.departureTime);
   const earliest = new Date(request?.earliestDeparture);
   const latest = new Date(request?.latestDeparture);
-  if (offerDeparture < earliest || offerDeparture > latest) {
+  const earliestWithMargin = new Date(earliest.getTime() - MATCH_TIME_MARGIN_MINUTES * 60 * 1000);
+  const latestWithMargin = new Date(latest.getTime() + MATCH_TIME_MARGIN_MINUTES * 60 * 1000);
+  if (offerDeparture < earliestWithMargin || offerDeparture > latestWithMargin) {
     return { ok: false, message: 'Selected offer departure time is outside the rider request window' };
   }
 
@@ -75,7 +80,7 @@ const isOfferCompatibleWithRequest = (offer, request) => {
 
   const originDistance = calculateDistance(offerOriginCoords, requestOriginCoords);
   const destinationDistance = calculateDistance(offerDestinationCoords, requestDestinationCoords);
-  if (originDistance > 5000 || destinationDistance > 5000) {
+  if (originDistance > MATCH_LOCATION_TOLERANCE_METERS || destinationDistance > MATCH_LOCATION_TOLERANCE_METERS) {
     return { ok: false, message: 'Selected offer route is not compatible with this rider request' };
   }
 
@@ -103,7 +108,7 @@ const isOfferCompatibleWithRequest = (offer, request) => {
 // @route   POST /api/rides/match  (mounted at /api/match in server.js → /api/match/rides/match)
 // @access  Private
 const matchRides = asyncHandler(async (req, res) => {
-  const { maxTimeDeviation = 30, maxRouteDeviation = 0.2, maxMatches = 5 } = req.body;
+  const { maxTimeDeviation = MATCH_TIME_MARGIN_MINUTES, maxRouteDeviation = 0.2, maxMatches = 5 } = req.body;
   const userId = req.user._id;
   
   let offers, requests;
@@ -342,6 +347,12 @@ const createMatch = asyncHandler(async (req, res) => {
   offer.bookingId = booking._id;
   await offer.save();
 
+  const rideParticipants = await getRideParticipants(offer._id);
+  await ensureChatRoomForRide(offer._id, {
+    driverId: rideParticipants.driverId || offer.driverId,
+    riderIds: rideParticipants.riderIds
+  });
+
   // 15. Emit real-time events
   req.io?.to(`user:${request.riderId}`).emit('matchCreated', {
     matchId: match._id,
@@ -503,11 +514,11 @@ const findMatchingRequests = (offer, requests, options) => {
     const departureTime = new Date(offer.departureTime);
     const earliest      = new Date(request.earliestDeparture);
     const latest        = new Date(request.latestDeparture);
-    
-    if (departureTime < earliest || departureTime > latest) return false;
-    
-    const timeDiff = Math.abs(departureTime - earliest) / 60000;
-    if (timeDiff > options.maxTimeDeviation) return false;
+    const marginMinutes = Number(options.maxTimeDeviation || MATCH_TIME_MARGIN_MINUTES);
+    const earliestWithMargin = new Date(earliest.getTime() - marginMinutes * 60 * 1000);
+    const latestWithMargin = new Date(latest.getTime() + marginMinutes * 60 * 1000);
+
+    if (departureTime < earliestWithMargin || departureTime > latestWithMargin) return false;
     
     const originDistance = calculateDistance(
       offer.origin.coordinates,
@@ -517,8 +528,8 @@ const findMatchingRequests = (offer, requests, options) => {
       offer.destination.coordinates,
       request.destination.coordinates
     );
-    
-    if (originDistance > 5000 || destinationDistance > 5000) return false;
+
+    if (originDistance > MATCH_LOCATION_TOLERANCE_METERS || destinationDistance > MATCH_LOCATION_TOLERANCE_METERS) return false;
     
     return true;
   });

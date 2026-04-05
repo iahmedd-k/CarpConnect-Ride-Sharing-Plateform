@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import api from "../../lib/api";
 import { io, Socket } from "socket.io-client";
 import { toast } from "sonner";
+import { useSearchParams } from "react-router-dom";
 
 
 const SOCKET_URL = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : 'http://localhost:5000';
@@ -19,7 +20,11 @@ const dedupeById = (items: any[]) => {
     });
 };
 
+const asId = (value: any) => String(value?._id || value?.id || value || "");
+
 const Messages = () => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const requestedBookingId = searchParams.get("bookingId");
     const [conversations, setConversations] = useState<any[]>([]);
     const [activeChat, setActiveChat] = useState<any>(null);
     const [newMsg, setNewMsg] = useState("");
@@ -66,7 +71,7 @@ const Messages = () => {
                         _id: msg._id || Date.now().toString(),
                         content: msg.content,
                         createdAt: msg.timestamp || msg.createdAt || new Date().toISOString(),
-                        sender: msg.sender || { _id: msg.senderId },
+                        sender: msg.sender || { _id: msg.senderId, role: msg.senderRole },
                         status: msg.status || "delivered",
                     };
                     return dedupeById([...prev, formattedMsg]);
@@ -96,8 +101,16 @@ const Messages = () => {
             const res = await api.get(role ? `/bookings?role=${role}` : "/bookings");
             const bookings = dedupeById(res.data?.data?.bookings || []);
             setConversations(bookings);
-            if (bookings.length > 0 && !activeChat) {
-                setActiveChat(bookings[0]);
+            if (bookings.length > 0) {
+                const requestedChat = requestedBookingId
+                    ? bookings.find((booking: any) => String(booking._id) === String(requestedBookingId))
+                    : null;
+
+                if (requestedChat) {
+                    setActiveChat(requestedChat);
+                } else if (!activeChat) {
+                    setActiveChat(bookings[0]);
+                }
             }
         } catch (err) {
             console.error("Failed to fetch conversations:", err);
@@ -180,7 +193,15 @@ const Messages = () => {
                                 return (
                                     <button
                                         key={convo._id}
-                                        onClick={() => setActiveChat(convo)}
+                                        onClick={() => {
+                                            setActiveChat(convo);
+                                            setSearchParams((prev) => {
+                                                const next = new URLSearchParams(prev);
+                                                next.set("tab", "messages");
+                                                next.set("bookingId", String(convo._id));
+                                                return next;
+                                            });
+                                        }}
                                         className={`w-full flex items-start gap-3 p-4 text-left hover:bg-muted/50 transition-colors border-b border-border/50 ${activeChat?._id === convo._id ? "bg-primary/5 border-primary/10" : ""}`}
                                     >
                                         <div className="shrink-0 w-11 h-11 rounded-full bg-gradient-primary flex items-center justify-center text-white text-sm font-bold">
@@ -206,7 +227,15 @@ const Messages = () => {
                                     <div className="flex items-center gap-3">
                                         <button
                                             type="button"
-                                            onClick={() => setActiveChat(null)}
+                                            onClick={() => {
+                                                setActiveChat(null);
+                                                setSearchParams((prev) => {
+                                                    const next = new URLSearchParams(prev);
+                                                    next.set("tab", "messages");
+                                                    next.delete("bookingId");
+                                                    return next;
+                                                });
+                                            }}
                                             className="md:hidden w-8 h-8 rounded-lg border border-border flex items-center justify-center"
                                         >
                                             <ArrowLeft className="w-4 h-4" />
@@ -228,18 +257,18 @@ const Messages = () => {
                                         </div>
                                     )}
                                     {msgs.map((msg, i) => (
-                                        <div key={msg._id} className={`flex ${msg.sender?._id === me?._id ? "justify-end" : "justify-start"} group`}>
+                                        <div key={msg._id} className={`flex ${asId(msg.sender) === asId(me) ? "justify-end" : "justify-start"} group`}>
                                             <div className="flex items-center gap-2">
-                                                {msg.sender?._id === me?._id && (
+                                                {asId(msg.sender) === asId(me) && (
                                                     <button onClick={() => deleteMessage(msg._id)} className="opacity-0 group-hover:opacity-100 p-2 text-red-500 hover:bg-red-500/10 rounded-full transition-all" title="Delete message">
                                                         <Trash2 size={14} />
                                                     </button>
                                                 )}
-                                                <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm ${msg.sender?._id === me?._id ? "bg-primary text-white" : "bg-card border border-border text-foreground"}`}>
+                                                <div className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm ${asId(msg.sender) === asId(me) ? "bg-primary text-white" : "bg-card border border-border text-foreground"}`}>
                                                     {msg.content}
                                                     <div className="text-[9px] mt-1 opacity-70 flex items-center justify-end gap-1">
                                                         {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                        {msg.sender?._id === me?._id && (
+                                                        {asId(msg.sender) === asId(me) && (
                                                             msg.status === 'seen' ? <CheckCheck size={12} className="text-blue-300" /> :
                                                             msg.status === 'delivered' ? <CheckCheck size={12} /> :
                                                             <Check size={12} />

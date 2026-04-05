@@ -33,13 +33,14 @@ const Signup = () => {
 
     useEffect(() => {
         const userData = localStorage.getItem("carpconnect_user");
-        if (userData) {
+        const token = localStorage.getItem("carpconnect_token");
+        if (userData && token) {
             try {
                 const user = JSON.parse(userData);
                 if (user.role === 'driver') {
-                    navigate("/driver-dashboard");
+                    navigate("/driver-dashboard", { replace: true });
                 } else {
-                    navigate("/dashboard");
+                    navigate("/dashboard", { replace: true });
                 }
             } catch (e) {
                 // Ignore parsing errors

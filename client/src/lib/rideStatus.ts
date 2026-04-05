@@ -10,7 +10,9 @@ export type CanonicalBookingStatus =
 
 export function normalizeOfferStatus(status: string | undefined | null): CanonicalOfferStatus {
   const s = String(status || "").toLowerCase();
-  if (s === "matched" || s === "booked" || s === "active" || s === "live") return "active";
+  // A ride should only look "active" once it has actually started.
+  // Pre-start statuses like matched/booked are still open offers from the rider's perspective.
+  if (s === "active" || s === "live") return "active";
   if (s === "completed") return "completed";
   if (s === "cancelled" || s === "canceled") return "cancelled";
   return "open";

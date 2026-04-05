@@ -51,6 +51,20 @@ const fmt = {
   },
 };
 
+const isCoordinateLikeText = (value?: string) => {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /^-?\d+(?:\.\d+)?\s*[, ]\s*-?\d+(?:\.\d+)?$/.test(text);
+};
+
+const readableRouteAddress = (primary?: string, fallback?: string) => {
+  const first = String(primary || "").trim();
+  if (first && !isCoordinateLikeText(first)) return first;
+  const second = String(fallback || "").trim();
+  if (second && !isCoordinateLikeText(second)) return second;
+  return "";
+};
+
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS[status] || STATUS.pending;
   const Icon = cfg.icon;
@@ -122,8 +136,8 @@ const RiderHistory = () => {
       if (!search.trim()) return true;
       const q = search.toLowerCase();
       return (
-        booking.offer?.origin?.address?.toLowerCase().includes(q) ||
-        booking.offer?.destination?.address?.toLowerCase().includes(q) ||
+        readableRouteAddress(booking.offer?.origin?.address, booking.request?.originAddress).toLowerCase().includes(q) ||
+        readableRouteAddress(booking.offer?.destination?.address, booking.request?.destinationAddress).toLowerCase().includes(q) ||
         booking.driver?.name?.toLowerCase().includes(q) ||
         booking._id?.toLowerCase().includes(q)
       );
@@ -226,6 +240,10 @@ const RiderHistory = () => {
               </thead>
               <tbody>
                 {paged.map((booking, index) => (
+                  (() => {
+                    const originLabel = readableRouteAddress(booking.offer?.origin?.address, booking.request?.originAddress);
+                    const destinationLabel = readableRouteAddress(booking.offer?.destination?.address, booking.request?.destinationAddress);
+                    return (
                   <motion.tr
                     key={booking._id}
                     initial={{ opacity: 0, y: 6 }}
@@ -255,9 +273,9 @@ const RiderHistory = () => {
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-1.5 text-xs">
                         <MapPin className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-                        <span className="max-w-[90px] truncate font-medium" title={booking.offer?.origin?.address}>{fmt.addr(booking.offer?.origin?.address)}</span>
+                        <span className="max-w-[90px] truncate font-medium" title={originLabel}>{fmt.addr(originLabel)}</span>
                         <span className="text-muted-foreground">→</span>
-                        <span className="max-w-[90px] truncate font-medium text-primary" title={booking.offer?.destination?.address}>{fmt.addr(booking.offer?.destination?.address)}</span>
+                        <span className="max-w-[90px] truncate font-medium text-primary" title={destinationLabel}>{fmt.addr(destinationLabel)}</span>
                       </div>
                     </td>
                     <td className="px-5 py-4 whitespace-nowrap">
@@ -281,6 +299,8 @@ const RiderHistory = () => {
                       </div>
                     </td>
                   </motion.tr>
+                    );
+                  })()
                 ))}
               </tbody>
             </table>
@@ -309,9 +329,9 @@ const RiderHistory = () => {
             </div>
             <div className="space-y-3 p-6 text-sm">
               <div className="rounded-2xl border border-border/40 bg-muted/10 p-4">
-                <div className="font-semibold">{detailBooking.offer?.origin?.address || "-"}</div>
+                <div className="font-semibold">{readableRouteAddress(detailBooking.offer?.origin?.address, detailBooking.request?.originAddress) || "-"}</div>
                 <div className="my-1 text-xs text-muted-foreground">to</div>
-                <div className="font-semibold text-primary">{detailBooking.offer?.destination?.address || "-"}</div>
+                <div className="font-semibold text-primary">{readableRouteAddress(detailBooking.offer?.destination?.address, detailBooking.request?.destinationAddress) || "-"}</div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-xl bg-muted/20 p-3"><div className="text-[10px] uppercase text-muted-foreground">Driver</div><div className="mt-1 font-semibold">{detailBooking.driver?.name || "-"}</div></div>

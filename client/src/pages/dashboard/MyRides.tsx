@@ -41,6 +41,13 @@ const STATUS: Record<string, { label: string; cls: string; icon: React.ElementTy
   completed: { label: "Completed", cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: CheckCircle2 },
 };
 
+const buildReviewedBookingMap = (reviews: any[] = []) =>
+  reviews.reduce((acc: Record<string, boolean>, review: any) => {
+    const bookingId = String(review?.bookingId || "");
+    if (bookingId) acc[bookingId] = true;
+    return acc;
+  }, {});
+
 const requestStatusLabel = (status: string) => {
   const normalized = String(status || "").toLowerCase();
   if (normalized === "open") return "Pending";
@@ -276,7 +283,7 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
     >
       <motion.div
         initial={{ scale: 0.94, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94, y: 20 }}
-        className="w-full max-w-2xl bg-card rounded-3xl border border-border/50 shadow-2xl overflow-hidden"
+        className="w-full max-w-5xl bg-card rounded-3xl border border-border/50 shadow-2xl overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
@@ -299,8 +306,8 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
           </div>
         </div>
 
-        <div className="p-5 space-y-4">
-          <div className="flex items-center gap-3 flex-wrap">
+        <div className="p-4 md:p-5">
+          <div className="flex items-center gap-3 flex-wrap mb-4">
             <StatusBadge status={currentStatus} />
             <span className="text-xs text-muted-foreground">
               Updated: {fmt.date(currentBooking?.updatedAt)} {fmt.time(currentBooking?.updatedAt)}
@@ -313,121 +320,125 @@ function RideTrackerModal({ booking, onClose }: { booking: any; onClose: () => v
             </button>
           </div>
 
-          {routeDeviationAlert && (
-            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                <div>
-                  <div className="text-sm font-semibold text-red-400">Route deviation alert</div>
-                  <div className="text-xs text-red-300/90 mt-0.5">{routeDeviationAlert}</div>
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+            <div className="space-y-4">
+              {routeDeviationAlert && (
+                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="text-sm font-semibold text-red-400">Route deviation alert</div>
+                      <div className="text-xs text-red-300/90 mt-0.5">{routeDeviationAlert}</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {arrivalNotice && (
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-              <div className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                <div>
-                  <div className="text-sm font-semibold text-emerald-500">Driver arrived</div>
-                  <div className="text-xs text-emerald-500/80 mt-0.5">{arrivalNotice}</div>
+              {arrivalNotice && (
+                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="text-sm font-semibold text-emerald-500">Driver arrived</div>
+                      <div className="text-xs text-emerald-500/80 mt-0.5">{arrivalNotice}</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {/* Live map */}
-          {hasMapData ? (
-            <div className="rounded-2xl border border-border/40 overflow-hidden">
-              <div className="h-72">
-                <LiveTrackingMap
-                  rideId={String(offer?._id || booking?.offerId || booking?.matchId || "")}
-                  origin={originPoint}
-                  destination={destinationPoint}
-                />
-              </div>
-              <div className="px-4 py-3 bg-muted/10 border-t border-border/40 flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <Navigation className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-medium text-foreground">
-                    {driverLocation
-                      ? `Driver live at ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`
-                      : "Route is ready. Waiting for the driver's live location."}
-                  </span>
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  Pickup: {fmt.addr(offer?.origin?.address)}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="h-40 rounded-2xl border-2 border-dashed border-border/40 bg-muted/10 flex items-center justify-center text-center p-6">
-              <div>
-                <AlertCircle className="w-8 h-8 mx-auto mb-2 text-muted-foreground/40" />
-                <p className="text-sm font-semibold text-foreground">Map coordinates unavailable</p>
-                <p className="text-xs text-muted-foreground mt-1">Live tracking will appear once driver location is shared.</p>
-              </div>
-            </div>
-          )}
-
-          {/* Info grid */}
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Status</p>
-              <StatusBadge status={currentStatus} />
-            </div>
-            <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Driver</p>
-              <p className="text-sm font-semibold">{currentBooking?.driver?.name || "-"}</p>
-            </div>
-            <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Seats</p>
-              <p className="text-sm font-semibold">{seatCount}</p>
-            </div>
-            <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Fare</p>
-              <p className="text-sm font-semibold">{fmt.currency(fareAmount)}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Pickup</p>
-              <p className="text-sm font-semibold text-foreground">{offer?.origin?.address || "-"}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Departure: {fmt.date(offer?.departureTime)} {fmt.time(offer?.departureTime)}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Drop-off</p>
-              <p className="text-sm font-semibold text-foreground">{offer?.destination?.address || "-"}</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {driverPhone ? `Driver phone: ${driverPhone}` : "Driver phone not shared yet"}
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Trip timeline</p>
-            <div className="space-y-2">
-              {timeline.map((item, idx) => {
-                const idxInOrder =
-                  item.key === "arrived"
-                    ? statusOrder.indexOf("confirmed")
-                    : Math.max(0, statusOrder.indexOf(item.key));
-                const passed = item.key === "arrived" ? Boolean(currentBooking?.arrivedAt) : currentIdx >= idxInOrder;
-                return (
-                  <div key={item.key} className="flex items-center justify-between gap-3 text-xs">
-                    <span className={passed ? "text-foreground font-semibold" : "text-muted-foreground"}>
-                      {item.title}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {item.when ? `${fmt.date(item.when)} ${fmt.time(item.when)}` : "-"}
+              {hasMapData ? (
+                <div className="rounded-2xl border border-border/40 overflow-hidden">
+                  <div className="h-52 sm:h-60 xl:h-[340px]">
+                    <LiveTrackingMap
+                      rideId={String(offer?._id || booking?.offerId || booking?.matchId || "")}
+                      origin={originPoint}
+                      destination={destinationPoint}
+                    />
+                  </div>
+                  <div className="px-4 py-3 bg-muted/10 border-t border-border/40 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Navigation className="w-4 h-4 text-primary shrink-0" />
+                      <span className="text-sm font-medium text-foreground truncate">
+                        {driverLocation
+                          ? `Driver live at ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`
+                          : "Waiting for the driver's live location."}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      Pickup: {fmt.addr(offer?.origin?.address)}
                     </span>
                   </div>
-                );
-              })}
+                </div>
+              ) : (
+                <div className="h-40 rounded-2xl border-2 border-dashed border-border/40 bg-muted/10 flex items-center justify-center text-center p-6">
+                  <div>
+                    <AlertCircle className="w-8 h-8 mx-auto mb-2 text-muted-foreground/40" />
+                    <p className="text-sm font-semibold text-foreground">Map coordinates unavailable</p>
+                    <p className="text-xs text-muted-foreground mt-1">Live tracking will appear once driver location is shared.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Status</p>
+                  <StatusBadge status={currentStatus} />
+                </div>
+                <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Driver</p>
+                  <p className="text-sm font-semibold">{currentBooking?.driver?.name || "-"}</p>
+                </div>
+                <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Seats</p>
+                  <p className="text-sm font-semibold">{seatCount}</p>
+                </div>
+                <div className="rounded-xl bg-muted/20 border border-border/40 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Fare</p>
+                  <p className="text-sm font-semibold">{fmt.currency(fareAmount)}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Pickup</p>
+                  <p className="text-sm font-semibold text-foreground">{offer?.origin?.address || "-"}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Departure: {fmt.date(offer?.departureTime)} {fmt.time(offer?.departureTime)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Drop-off</p>
+                  <p className="text-sm font-semibold text-foreground">{offer?.destination?.address || "-"}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {driverPhone ? `Driver phone: ${driverPhone}` : "Driver phone not shared yet"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border/40 bg-muted/10 px-4 py-3">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Trip timeline</p>
+                <div className="space-y-2">
+                  {timeline.map((item, idx) => {
+                    const idxInOrder =
+                      item.key === "arrived"
+                        ? statusOrder.indexOf("confirmed")
+                        : Math.max(0, statusOrder.indexOf(item.key));
+                    const passed = item.key === "arrived" ? Boolean(currentBooking?.arrivedAt) : currentIdx >= idxInOrder;
+                    return (
+                      <div key={item.key} className="flex items-center justify-between gap-3 text-xs">
+                        <span className={passed ? "text-foreground font-semibold" : "text-muted-foreground"}>
+                          {item.title}
+                        </span>
+                        <span className="text-muted-foreground text-right">
+                          {item.when ? `${fmt.date(item.when)} ${fmt.time(item.when)}` : "-"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -446,8 +457,18 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
   const [isLocked, setIsLocked] = useState(false);
   const socketRef = useRef<Socket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const asId = (value: any) => String(value?._id || value?.id || value || "");
+  const dedupeMsgs = (items: any[]) => {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = String(item?._id || "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
 
-  const partner = booking.driver?._id === me?._id ? booking.rider : booking.driver;
+  const partner = asId(booking.driver) === asId(me) ? booking.rider : booking.driver;
 
   useEffect(() => {
     fetchMsgs();
@@ -458,10 +479,10 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
       setIsLocked(Boolean(response?.isLocked));
     });
     socketRef.current.on("chat:message", (msg: any) => {
-      setMsgs(prev => prev.find(m => m._id === msg._id) ? prev : [
+      setMsgs(prev => dedupeMsgs([
         ...prev,
-        { _id: msg._id || Date.now(), content: msg.content, createdAt: msg.timestamp || new Date(), sender: { _id: msg.senderId } },
-      ]);
+        { _id: msg._id || Date.now(), content: msg.content, createdAt: msg.timestamp || new Date(), sender: msg.sender || { _id: msg.senderId, role: msg.senderRole } },
+      ]));
     });
     socketRef.current.on("ride_ended", () => {
       setIsLocked(true);
@@ -479,7 +500,7 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
     setLoading(true);
     try {
       const res = await api.get(`/chat/${booking._id}`);
-      setMsgs(res.data?.data?.messages || []);
+      setMsgs(dedupeMsgs(res.data?.data?.messages || []));
       setIsLocked(Boolean(res.data?.data?.room?.isLocked));
     } catch { /* silent */ } finally { setLoading(false); }
   };
@@ -490,7 +511,7 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
     setText("");
     try {
       const res = await api.post("/chat", { bookingId: booking._id, content: payload });
-      if (res.data?.data?.message) setMsgs(prev => [...prev, res.data.data.message]);
+      if (res.data?.data?.message) setMsgs(prev => dedupeMsgs([...prev, res.data.data.message]));
       else fetchMsgs();
     } catch { toast.error("Failed to send message."); }
   };
@@ -546,7 +567,7 @@ function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: (
             <div className="text-center text-sm text-muted-foreground pt-10">No messages yet. Say hello! 👋</div>
           )}
           {msgs.map(msg => {
-            const isMe = msg.sender?._id === me?._id;
+            const isMe = asId(msg.sender) === asId(me);
             return (
               <div key={msg._id} className={`flex ${isMe ? "justify-end" : "justify-start"} group`}>
                 <div className="flex items-center gap-2">
@@ -699,6 +720,7 @@ const MyRides = () => {
   const [detailBooking,     setDetailBooking]     = useState<any>(null);
   const [trackBooking,      setTrackBooking]      = useState<any>(null);
   const [reviewBooking,     setReviewBooking]     = useState<any>(null);
+  const [reviewedBookingIds, setReviewedBookingIds] = useState<Record<string, boolean>>({});
   const [completedPrompt,   setCompletedPrompt]   = useState<any>(null);
   const [me,                setMe]                = useState<any>(null);
 
@@ -711,17 +733,20 @@ const MyRides = () => {
   const fetchRiderData = async () => {
     setLoading(true);
     try {
-      const [bookingRes, requestRes] = await Promise.all([
+      const [bookingRes, requestRes, reviewRes] = await Promise.all([
         api.get("/bookings?role=rider"),
         api.get("/rides/requests/me"),
+        api.get("/reviews/history"),
       ]);
       const nextBookings = (bookingRes.data?.data?.bookings || bookingRes.data?.bookings || []).map((booking: any) => ({
         ...booking,
         status: normalizeBookingStatus(booking?.status),
       }));
       const nextRequests = requestRes.data?.data?.requests || [];
+      const givenReviews = reviewRes.data?.data?.reviewsGiven || [];
       setBookings(nextBookings.filter((booking: any) => !booking.hiddenForRider));
       setRideRequests(nextRequests);
+      setReviewedBookingIds(buildReviewedBookingMap(givenReviews));
     } catch {
       toast.error("Failed to load rider trips.");
     } finally {
@@ -780,7 +805,7 @@ const MyRides = () => {
         setBookings(prev => prev.map(b => {
           if (b._id !== data.bookingId) return b;
           const next = { ...b, status: normalizeBookingStatus(data.status) };
-          if (data.status === "completed") {
+          if (data.status === "completed" && !reviewedBookingIds[String(next._id || "")]) {
             setCompletedPrompt(next);
           }
           return next;
@@ -801,7 +826,7 @@ const MyRides = () => {
       }
     });
     return () => { socket.disconnect(); };
-  }, []);
+  }, [reviewedBookingIds]);
 
   /* ---- filter / search / sort (defined ONCE, in component scope) ---- */
   const filtered = bookings
@@ -1066,8 +1091,8 @@ const MyRides = () => {
                     </td>
 
                     {/* Actions */}
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-1.5 flex-wrap">
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
                         <button onClick={() => setDetailBooking(b)} title="View Details"
                           className="p-2 rounded-xl bg-muted/30 hover:bg-primary/10 hover:text-primary transition-all">
                           <Eye className="w-3.5 h-3.5" />
@@ -1119,10 +1144,21 @@ const MyRides = () => {
                         )}
 
                         {b.status === "completed" && (
-                          <button onClick={() => setReviewBooking(b)} title="Rate Journey"
-                            className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition-all">
-                            <Star className="w-3.5 h-3.5" />
-                          </button>
+                          reviewedBookingIds[String(b._id || "")] ? (
+                            <button
+                              type="button"
+                              onClick={() => toast.info("You already reviewed this ride.")}
+                              title="Already reviewed"
+                              className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-2 text-[10px] font-bold uppercase tracking-wider text-emerald-500 transition-all hover:bg-emerald-500/20"
+                            >
+                              Reviewed
+                            </button>
+                          ) : (
+                            <button onClick={() => setReviewBooking(b)} title="Rate Journey"
+                              className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 transition-all">
+                              <Star className="w-3.5 h-3.5" />
+                            </button>
+                          )
                         )}
 
                         {["completed", "cancelled", "rejected"].includes(b.status) && (
@@ -1176,8 +1212,14 @@ const MyRides = () => {
           <RateRideModal
             key="review"
             booking={reviewBooking}
+            alreadyReviewed={Boolean(reviewedBookingIds[String(reviewBooking?._id || "")])}
             onClose={() => setReviewBooking(null)}
-            onSuccess={() => { setReviewBooking(null); toast.success("Review submitted! ⭐"); fetchRiderData(); }}
+            onSuccess={() => {
+              setReviewedBookingIds((prev) => ({ ...prev, [String(reviewBooking?._id || "")]: true }));
+              setReviewBooking(null);
+              toast.success("Review submitted! ⭐");
+              fetchRiderData();
+            }}
           />
         )}
         {completedPrompt && (
@@ -1186,6 +1228,11 @@ const MyRides = () => {
             booking={completedPrompt}
             onClose={() => setCompletedPrompt(null)}
             onRate={() => {
+              if (reviewedBookingIds[String(completedPrompt?._id || "")]) {
+                toast.info("You already reviewed this ride.");
+                setCompletedPrompt(null);
+                return;
+              }
               setReviewBooking(completedPrompt);
               setCompletedPrompt(null);
             }}

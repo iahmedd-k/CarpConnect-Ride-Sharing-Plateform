@@ -107,6 +107,13 @@ const hydrateBookings = async (bookings) => {
   const matchIds = [...new Set(bookings.map((b) => String(b.matchId)).filter(Boolean))];
   const matches  = await Match.find({ _id: { $in: matchIds } }).lean();
   const matchMap = new Map(matches.map((m) => [String(m._id), m]));
+  const requestIds = [
+    ...new Set(
+      matches
+        .map((m) => String(m.requestId || ""))
+        .filter(Boolean)
+    ),
+  ];
 
   const offerIds = [
     ...new Set(
@@ -130,21 +137,24 @@ const hydrateBookings = async (bookings) => {
     ),
   ];
 
-  const [offers, riders, drivers] = await Promise.all([
+  const [offers, riders, drivers, requests] = await Promise.all([
     RideOffer.find({ _id: { $in: offerIds } }).lean(),
     User.find({ _id: { $in: riderIds } }).select('name email phone profilePhoto ratings vehicle').lean(),
     User.find({ _id: { $in: driverIds } }).select('name email phone profilePhoto ratings vehicle').lean(),
+    RideRequest.find({ _id: { $in: requestIds } }).lean(),
   ]);
 
   const offerMap  = new Map(offers.map((o)  => [String(o._id), o]));
   const riderMap  = new Map(riders.map((u)  => [String(u._id), u]));
   const driverMap = new Map(drivers.map((u) => [String(u._id), u]));
+  const requestMap = new Map(requests.map((r) => [String(r._id), r]));
 
   return bookings.map((booking) => {
     const matchDoc  = matchMap.get(String(booking.matchId));
     const offerDoc  = offerMap.get(String(booking.offerId || matchDoc?.offerId));
     const driverDoc = driverMap.get(String(booking.driverId || offerDoc?.driverId));
     const riderDoc  = riderMap.get(String(booking.userId));
+    const requestDoc = requestMap.get(String(matchDoc?.requestId || ""));
     const offer     = offerDoc ? toOfferResponse(offerDoc, driverDoc) : null;
 
     // Normalise fare so the frontend always gets { totalAmount, currency }
@@ -169,6 +179,19 @@ const hydrateBookings = async (bookings) => {
             requestId: String(matchDoc.requestId),
             matchScore: matchDoc.matchScore,
             optimizedRoute: matchDoc.optimizedRoute,
+            pickupPoints: matchDoc.pickupPoints || [],
+            dropoffPoints: matchDoc.dropoffPoints || [],
+          }
+        : undefined,
+      request: requestDoc
+        ? {
+            _id: String(requestDoc._id),
+            originAddress: requestDoc.originAddress || "",
+            destinationAddress: requestDoc.destinationAddress || "",
+            origin: requestDoc.origin || null,
+            destination: requestDoc.destination || null,
+            earliestDeparture: requestDoc.earliestDeparture || null,
+            latestDeparture: requestDoc.latestDeparture || null,
           }
         : undefined,
     };

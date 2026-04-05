@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import {
   CheckCircle, XCircle, User, MessageSquare,
   Loader2, Navigation, Clock, DollarSign,
-  Users, MapPin, AlertCircle, Star, PlusCircle,
+  Users, MapPin, AlertCircle, Star, PlusCircle, Send, Trash2, X, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -18,6 +18,13 @@ import { useNavigate } from "react-router-dom";
 const SOCKET_URL = import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL.replace("/api", "")
   : "http://localhost:5000";
+
+const buildReviewedBookingMap = (reviews: any[] = []) =>
+  reviews.reduce((acc: Record<string, boolean>, review: any) => {
+    const bookingId = String(review?.bookingId || "");
+    if (bookingId) acc[bookingId] = true;
+    return acc;
+  }, {});
 
 /* ------------------------------------------------------------------ */
 /*  Reverse-geocode cache (same pattern as MyOffers)                   */
@@ -100,12 +107,56 @@ function shortAddr(point: any, fallback = "Unknown") {
   return fallback;
 }
 
+function toLocalDateInput(raw: string | undefined) {
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function toLocalTimeInput(raw: string | undefined) {
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
 function fareDisplay(fare: any, fallback = "—"): string {
   if (!fare) return fallback;
   if (typeof fare === "number") return `PKR ${fare}`;
   if (typeof fare === "object" && fare.totalAmount != null)
     return `${fare.currency || "PKR"} ${Number(fare.totalAmount).toLocaleString()}`;
   return fallback;
+}
+
+function getBookingRouteSource(booking: any, kind: "origin" | "destination") {
+  const requestField = booking?.request?.[kind];
+  if (requestField?.coordinates?.length >= 2 || requestField?.address) return requestField;
+
+  const bookingField = booking?.[kind];
+  if (bookingField?.coordinates?.length >= 2 || bookingField?.address) return bookingField;
+
+  return booking?.offer?.[kind] || null;
+}
+
+function getBookingRouteFallback(booking: any, kind: "origin" | "destination") {
+  const requestAddress = kind === "origin"
+    ? booking?.request?.originAddress
+    : booking?.request?.destinationAddress;
+  if (typeof requestAddress === "string" && requestAddress.trim()) return requestAddress;
+
+  const bookingAddress = kind === "origin" ? booking?.originAddress : booking?.destinationAddress;
+  if (typeof bookingAddress === "string" && bookingAddress.trim()) return bookingAddress;
+
+  const offerAddress = booking?.offer?.[kind]?.address;
+  if (typeof offerAddress === "string" && offerAddress.trim()) return offerAddress;
+
+  return kind === "origin" ? "Unknown origin" : "Unknown destination";
 }
 
 function statusBadge(status: string) {
@@ -119,29 +170,206 @@ function statusBadge(status: string) {
   }
 }
 
+function ChatModal({ booking, me, onClose }: { booking: any; me: any; onClose: () => void }) {
+  const [msgs, setMsgs] = useState<any[]>([]);
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [isLocked, setIsLocked] = useState(false);
+  const socketRef = useRef<any>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const asId = (value: any) => String(value?._id || value?.id || value || "");
+  const dedupeMsgs = (items: any[]) => {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = String(item?._id || "");
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  const partner = asId(booking.driver) === asId(me) ? booking.rider : booking.driver;
+
+  useEffect(() => {
+    const fetchMsgs = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get(`/chat/${booking._id}`);
+        setMsgs(dedupeMsgs(res.data?.data?.messages || []));
+        setIsLocked(Boolean(res.data?.data?.room?.isLocked));
+      } catch {
+        toast.error("Failed to load chat.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMsgs();
+    const token = localStorage.getItem("carpconnect_token");
+    if (!token) return;
+    socketRef.current = io(SOCKET_URL, { auth: { token }, transports: ["websocket"] });
+    socketRef.current.emit("join:chat", { bookingId: booking._id }, (response: any) => {
+      setIsLocked(Boolean(response?.isLocked));
+    });
+    socketRef.current.on("chat:message", (msg: any) => {
+      setMsgs((prev: any[]) => dedupeMsgs([
+        ...prev,
+        {
+          _id: msg._id || Date.now(),
+          content: msg.content,
+          createdAt: msg.timestamp || new Date(),
+          sender: msg.sender || { _id: msg.senderId, role: msg.senderRole },
+          status: msg.status || "delivered",
+        },
+      ]));
+    });
+    socketRef.current.on("ride_ended", () => {
+      setIsLocked(true);
+    });
+
+    return () => {
+      socketRef.current?.emit("leave:chat", { bookingId: booking._id });
+      socketRef.current?.disconnect();
+    };
+  }, [booking._id]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs]);
+
+  const send = async () => {
+    if (!text.trim() || isLocked) return;
+    const payload = text.trim();
+    setText("");
+    try {
+      const res = await api.post("/chat", { bookingId: booking._id, content: payload });
+      if (res.data?.data?.message) {
+        setMsgs((prev: any[]) => dedupeMsgs([...prev, res.data.data.message]));
+      }
+    } catch {
+      toast.error("Failed to send message.");
+    }
+  };
+
+  const del = async (id: string) => {
+    try {
+      await api.delete(`/chat/${id}`);
+      setMsgs((prev: any[]) => prev.filter((item) => item._id !== id));
+    } catch {
+      toast.error("Failed to delete message.");
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <motion.div
+        initial={{ scale: 0.94, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94, y: 20 }}
+        className="w-full max-w-lg bg-card rounded-3xl border border-border/50 shadow-2xl flex flex-col overflow-hidden"
+        style={{ height: "70vh", maxHeight: "600px" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-border bg-card flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center overflow-hidden shrink-0">
+            {partner?.avatar
+              ? <img src={partner.avatar} alt="avatar" className="w-full h-full object-cover" />
+              : <span className="font-bold text-primary text-sm">{partner?.name?.[0] || "?"}</span>}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-sm">{partner?.name || "Unknown"}</p>
+            <p className="text-[10px] text-muted-foreground truncate">
+              {booking.offer?.origin?.address?.split(",")[0] || "Ride"} → {booking.offer?.destination?.address?.split(",")[0] || ""}
+            </p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl hover:bg-muted/50 transition-colors flex-shrink-0">
+            <X className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-muted/5 min-h-0">
+          {isLocked && (
+            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-700">
+              This ride has ended. Group chat is now closed.
+            </div>
+          )}
+          {loading && (
+            <div className="flex justify-center pt-10">
+              <Loader2 className="w-6 h-6 animate-spin text-primary/40" />
+            </div>
+          )}
+          {!loading && msgs.length === 0 && (
+            <div className="text-center text-sm text-muted-foreground pt-10">No messages yet. Say hello!</div>
+          )}
+          {msgs.map((msg) => {
+            const isMe = asId(msg.sender) === asId(me);
+            return (
+              <div key={msg._id} className={`flex ${isMe ? "justify-end" : "justify-start"} group`}>
+                <div className="flex items-center gap-2">
+                  {isMe && (
+                    <button onClick={() => del(msg._id)} className="opacity-0 group-hover:opacity-100 p-1.5 text-red-400 hover:bg-red-500/10 rounded-full transition-all">
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                  <div className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm ${isMe ? "bg-primary text-white" : "bg-card border border-border text-foreground"}`}>
+                    <p>{msg.content}</p>
+                    <div className="text-[9px] mt-1 opacity-60 flex items-center gap-1 justify-end">
+                      {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="px-4 py-3 border-t border-border bg-card flex items-center gap-2 flex-shrink-0">
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && send()}
+            placeholder={isLocked ? "Chat closed for completed ride" : "Type a message..."}
+            disabled={isLocked}
+            className="flex-1 bg-muted/30 rounded-xl px-4 py-2.5 text-sm outline-none border border-border focus:border-primary transition-all disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <Button onClick={send} disabled={isLocked || !text.trim()} className="h-10 w-10 p-0 bg-primary text-white rounded-xl shrink-0 disabled:opacity-60">
+            <Send className="w-4 h-4" />
+          </Button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  BookingCard — own component so hooks are called at top level       */
 /* ------------------------------------------------------------------ */
 function BookingCard({
-  booking, updatingId, onStatus, onLive, onReview,
+  booking, updatingId, onStatus, onLive, onReview, onChat, alreadyReviewed,
 }: {
   booking: any;
   updatingId: string | null;
   onStatus: (id: string, status: string) => void;
   onLive: (b: any) => void;
   onReview: (b: any) => void;
+  onChat: (b: any) => void;
+  alreadyReviewed: boolean;
 }) {
   // Resolve addresses from GeoJSON coordinates, fallback to nested address fields
-  const originGeo = booking.offer?.origin || booking.origin;
-  const destGeo   = booking.offer?.destination || booking.destination;
+  const originGeo = getBookingRouteSource(booking, "origin");
+  const destGeo   = getBookingRouteSource(booking, "destination");
   const originLabel =
     (originGeo && originGeo.coordinates && originGeo.coordinates.length >= 2)
       ? useAddr(originGeo)
-      : (booking.offer?.origin?.address || booking.originAddress || "Unknown origin");
+      : getBookingRouteFallback(booking, "origin");
   const destLabel =
     (destGeo && destGeo.coordinates && destGeo.coordinates.length >= 2)
       ? useAddr(destGeo)
-      : (booking.offer?.destination?.address || booking.destinationAddress || "Unknown destination");
+      : getBookingRouteFallback(booking, "destination");
   const isBusy = updatingId === booking._id;
   return (
     <motion.div
@@ -229,7 +457,7 @@ function BookingCard({
         <div className="flex flex-col gap-2">
           <Button
             className="w-full h-8.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-xs font-semibold border border-emerald-200"
-            onClick={() => { window.location.href = "/driver-dashboard?tab=messages"; }}
+            onClick={() => onChat(booking)}
           >
             <MessageSquare className="w-4 h-4 mr-2" /> Open Chat
           </Button>
@@ -243,12 +471,23 @@ function BookingCard({
       )}
 
       {booking.status === "completed" && (
-        <Button
-          onClick={() => onReview(booking)}
-          className="w-full h-8.5 bg-amber-50 text-amber-600 hover:bg-amber-100 text-xs font-semibold border border-amber-200"
-        >
-          <Star className="w-4 h-4 mr-2" /> Rate Rider
-        </Button>
+        alreadyReviewed ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => toast.info("You already reviewed this rider.")}
+            className="w-full h-8.5 border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 text-xs font-semibold"
+          >
+            <CheckCircle className="w-4 h-4 mr-2" /> Already Reviewed
+          </Button>
+        ) : (
+          <Button
+            onClick={() => onReview(booking)}
+            className="w-full h-8.5 bg-amber-50 text-amber-600 hover:bg-amber-100 text-xs font-semibold border border-amber-200"
+          >
+            <Star className="w-4 h-4 mr-2" /> Rate Rider
+          </Button>
+        )
       )}
 
       {booking.status === "cancelled" && (
@@ -273,8 +512,16 @@ function LiveRideTracker({
 }) {
   const [stage, setStage] = useState(1);
   const labels = ["En route to pickup", "Arrived at pickup", "Ready to continue in Live Ride"];
-  const originLabel = useAddr(booking.offer?.origin || booking.origin);
-  const destLabel   = useAddr(booking.offer?.destination || booking.destination);
+  const originGeo = getBookingRouteSource(booking, "origin");
+  const destGeo   = getBookingRouteSource(booking, "destination");
+  const originLabel =
+    originGeo?.coordinates?.length >= 2
+      ? useAddr(originGeo)
+      : getBookingRouteFallback(booking, "origin");
+  const destLabel =
+    destGeo?.coordinates?.length >= 2
+      ? useAddr(destGeo)
+      : getBookingRouteFallback(booking, "destination");
 
   return (
     <div
@@ -326,7 +573,7 @@ function LiveRideTracker({
 /*  RideRequestCard — own component for hooks                          */
 /* ------------------------------------------------------------------ */
 function RideRequestCard({
-  req, actionId, counterFare, onCounterChange, onAccept, onReject, onCounter, onCreateOffer,
+  req, actionId, counterFare, onCounterChange, onAccept, onReject, onCounter, onCreateOffer, highlighted = false,
 }: {
   req: any;
   actionId: string | null;
@@ -336,6 +583,7 @@ function RideRequestCard({
   onReject: () => void;
   onCounter: () => void;
   onCreateOffer: () => void;
+  highlighted?: boolean;
 }) {
   // Resolve addresses from origin/destination GeoJSON on the request itself, fallback to string address
   const originLabel =
@@ -352,7 +600,13 @@ function RideRequestCard({
   const hasCompatibleOffer = Array.isArray(req?.compatibleOffers) && req.compatibleOffers.length > 0;
 
   return (
-    <div className="rounded-2xl border border-gray-200 p-3.5 bg-white">
+    <div
+      className={`rounded-2xl border p-3.5 bg-white transition-all ${
+        highlighted
+          ? "border-emerald-300 ring-2 ring-emerald-100 shadow-sm shadow-emerald-100"
+          : "border-gray-200"
+      }`}
+    >
       <div className="flex items-start justify-between gap-3 mb-2.5">
         <div>
           <p className="text-sm font-bold text-gray-900">{req.rider?.name || "Rider"}</p>
@@ -437,6 +691,11 @@ function RideRequestCard({
           </Button>
         </div>
       )}
+      {hasCompatibleOffer && highlighted && (
+        <p className="mt-2 text-[11px] font-medium text-emerald-600">
+          Your newly created offer matches this request. You can accept it now.
+        </p>
+      )}
     </div>
   );
 }
@@ -454,17 +713,24 @@ const DriverBookings = () => {
   const [requestsLoading, setRequestsLoading] = useState(true);
   const [updatingId, setUpdatingId]     = useState<string | null>(null);
   const [liveBooking, setLiveBooking]   = useState<any>(null);
+  const [chatBooking, setChatBooking]   = useState<any>(null);
   const [reviewBooking, setReviewBooking] = useState<any>(null);
+  const [reviewedBookingIds, setReviewedBookingIds] = useState<Record<string, boolean>>({});
   const [requestActionId, setRequestActionId] = useState<string | null>(null);
   const [counterFareById, setCounterFareById] = useState<Record<string, string>>({});
+  const [highlightRequestId, setHighlightRequestId] = useState<string | null>(null);
   const [timeFilter, setTimeFilter]     = useState<"all" | "today" | "week" | "month">("all");
   const socketRef = useRef<any>(null);
 
   /* ---- API calls ---- */
   const fetchBookings = async () => {
     try {
-      const res = await api.get("/bookings?role=driver");
+      const [res, reviewRes] = await Promise.all([
+        api.get("/bookings?role=driver"),
+        api.get("/reviews/history"),
+      ]);
       const list = res.data?.data?.bookings || res.data?.bookings || [];
+      const givenReviews = reviewRes.data?.data?.reviewsGiven || [];
       const user = JSON.parse(localStorage.getItem("carpconnect_user") || "{}");
       // Filter to only bookings where this driver is the driver
       const mine = list.filter((b: any) =>
@@ -473,6 +739,7 @@ const DriverBookings = () => {
         !b.hiddenForDriver
       );
       setBookings(mine);
+      setReviewedBookingIds(buildReviewedBookingMap(givenReviews));
     } catch (err) {
       console.error("Failed to fetch bookings:", err);
     } finally {
@@ -533,6 +800,21 @@ const DriverBookings = () => {
     });
     return () => { socket?.disconnect(); };
   }, []);
+
+  const handleRefresh = async () => {
+    setLoading(true);
+    setRequestsLoading(true);
+    try {
+      await Promise.all([
+        fetchBookings(),
+        fetchDriverRequests(),
+        fetchDriverOffers(),
+      ]);
+      toast.success("Manage Requests refreshed.");
+    } catch {
+      toast.error("Failed to refresh requests.");
+    }
+  };
 
   /* ---- helpers ---- */
   const getBestOffer = (request: any) => {
@@ -611,15 +893,53 @@ const DriverBookings = () => {
     const offerDraft = {
       origin: request.originAddress || "",
       destination: request.destinationAddress || "",
-      departureDate: request.earliestDeparture ? new Date(request.earliestDeparture).toISOString().slice(0, 10) : "",
-      earliestTime: request.earliestDeparture ? new Date(request.earliestDeparture).toTimeString().slice(0, 5) : "08:00",
-      latestTime: request.latestDeparture ? new Date(request.latestDeparture).toTimeString().slice(0, 5) : "08:30",
+      departureDate: toLocalDateInput(request.earliestDeparture),
+      earliestTime: toLocalTimeInput(request.earliestDeparture) || "08:00",
+      latestTime: toLocalTimeInput(request.latestDeparture) || "08:30",
       seatsTotal: Number(request.seatsNeeded || 1),
       pricePerSeat: request.maxPricePerSeat ? String(request.maxPricePerSeat) : "",
     };
     localStorage.setItem("carpconnect_offer_draft", JSON.stringify(offerDraft));
+    localStorage.setItem(
+      "carpconnect_offer_return_request",
+      JSON.stringify({
+        requestId: request._id,
+        riderName: request.rider?.name || "Rider",
+        originAddress: request.originAddress || "",
+        destinationAddress: request.destinationAddress || "",
+      })
+    );
     navigate("/driver-dashboard?tab=offer");
   };
+
+  useEffect(() => {
+    const rawContext = localStorage.getItem("carpconnect_offer_return_request");
+    if (!rawContext || rideRequests.length === 0) return;
+
+    try {
+      const context = JSON.parse(rawContext);
+      const requestId = String(context?.requestId || "");
+      if (!requestId) {
+        localStorage.removeItem("carpconnect_offer_return_request");
+        return;
+      }
+
+      const matchedRequest = rideRequests.find((request: any) => String(request._id) === requestId);
+      if (!matchedRequest) return;
+
+      setHighlightRequestId(requestId);
+      if (Array.isArray(matchedRequest.compatibleOffers) && matchedRequest.compatibleOffers.length > 0) {
+        toast.success("Your new offer matches this rider request. You can accept it now.");
+        localStorage.removeItem("carpconnect_offer_return_request");
+        return;
+      }
+
+      toast.info("Offer created. We’re checking whether this rider request now matches your route.");
+      localStorage.removeItem("carpconnect_offer_return_request");
+    } catch {
+      localStorage.removeItem("carpconnect_offer_return_request");
+    }
+  }, [rideRequests]);
 
   /* ---- booking status ---- */
   const handleStatus = async (id: string, newStatus: string) => {
@@ -763,6 +1083,7 @@ const DriverBookings = () => {
                 onReject={() => handleRejectRequest(req._id)}
                 onCounter={() => handleCounterRequest(req)}
                 onCreateOffer={() => handleCreateMatchingOffer(req)}
+                highlighted={highlightRequestId === req._id}
               />
             ))}
           </div>
@@ -774,18 +1095,29 @@ const DriverBookings = () => {
         <div>
           <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Manage Requests</h2>
         </div>
-        <div className="flex gap-1 p-1 bg-gray-100 rounded-xl overflow-x-auto no-scrollbar w-full sm:w-auto">
-          {(["all", "today", "week", "month"] as const).map(tf => (
-            <button
-              key={tf}
-              onClick={() => setTimeFilter(tf)}
-              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
-                timeFilter === tf ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400 hover:text-gray-700"
-              }`}
-            >
-              {tf}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={loading || requestsLoading}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition hover:border-emerald-200 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${(loading || requestsLoading) ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+          <div className="flex gap-1 p-1 bg-gray-100 rounded-xl overflow-x-auto no-scrollbar w-full sm:w-auto">
+            {(["all", "today", "week", "month"] as const).map(tf => (
+              <button
+                key={tf}
+                onClick={() => setTimeFilter(tf)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all whitespace-nowrap ${
+                  timeFilter === tf ? "bg-white text-emerald-600 shadow-sm" : "text-gray-400 hover:text-gray-700"
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -799,14 +1131,17 @@ const DriverBookings = () => {
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+          <div className="space-y-4">
             {bookingGroupEntries.map(([offerId, group]) => {
             const offer = group.offer;
             const routeLabel = offer
               ? `${shortAddr(offer.originAddress || offer.origin?.address || offer.origin, "Origin")} -> ${shortAddr(offer.destinationAddress || offer.destination?.address || offer.destination, "Destination")}`
               : "Offer details unavailable";
+            const pendingRequests = group.bookings.filter((booking: any) => booking.status === "pending").length;
             const activeRiders = group.bookings.filter((booking: any) => ["confirmed", "picked_up", "live"].includes(booking.status)).length;
-            const seatDemand = group.bookings.reduce((sum: number, booking: any) => sum + Number(booking.seatCount || booking.seatsRequested || booking.seats || 1), 0);
+            const confirmedSeats = group.bookings
+              .filter((booking: any) => ["confirmed", "picked_up", "live"].includes(booking.status))
+              .reduce((sum: number, booking: any) => sum + Number(booking.seatCount || booking.seatsRequested || booking.seats || 1), 0);
 
             return (
               <div key={offerId} className="bg-white rounded-2xl border border-gray-200 p-4">
@@ -819,14 +1154,19 @@ const DriverBookings = () => {
                   </div>
                   <div className="flex gap-2 flex-wrap">
                     <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 text-[10px] font-bold uppercase tracking-wider">
-                      {group.bookings.length} riders
+                      {group.bookings.length} requests
                     </span>
                     <span className="px-3 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-200 text-[10px] font-bold uppercase tracking-wider">
-                      {seatDemand} seats requested
+                      {confirmedSeats} seats confirmed
                     </span>
                     <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-600 border border-blue-200 text-[10px] font-bold uppercase tracking-wider">
                       {activeRiders} active
                     </span>
+                    {pendingRequests > 0 && (
+                      <span className="px-3 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-200 text-[10px] font-bold uppercase tracking-wider">
+                        {pendingRequests} pending
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -838,6 +1178,8 @@ const DriverBookings = () => {
                       onStatus={handleStatus}
                       onLive={setLiveBooking}
                       onReview={setReviewBooking}
+                      onChat={setChatBooking}
+                      alreadyReviewed={Boolean(reviewedBookingIds[String(booking?._id || "")])}
                     />
                   ))}
                 </div>
@@ -856,13 +1198,23 @@ const DriverBookings = () => {
         />
       )}
 
+      {chatBooking && (
+        <ChatModal
+          booking={chatBooking}
+          me={JSON.parse(localStorage.getItem("carpconnect_user") || "{}")}
+          onClose={() => setChatBooking(null)}
+        />
+      )}
+
       {reviewBooking && (
         <RateRideModal
           booking={reviewBooking}
           targetUser={reviewBooking.rider}
           subjectLabel="ride with rider"
+          alreadyReviewed={Boolean(reviewedBookingIds[String(reviewBooking?._id || "")])}
           onClose={() => setReviewBooking(null)}
           onSuccess={() => {
+            setReviewedBookingIds((prev) => ({ ...prev, [String(reviewBooking?._id || "")]: true }));
             setReviewBooking(null);
             toast.success("Review submitted!");
           }}

@@ -25,7 +25,14 @@ import api from "../../lib/api";
 import { useNavigate } from "react-router-dom";
 import { currentPlanFromStorage, hasPlanAtLeast } from "@/lib/planAccess";
 
-const todayLocal = () => new Date().toISOString().split("T")[0];
+const toIsoDateLocal = (value: Date) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const todayLocal = () => toIsoDateLocal(new Date());
 const WEEKDAY_OPTIONS = [
   { code: "mon", label: "Mon" },
   { code: "tue", label: "Tue" },
@@ -46,6 +53,35 @@ const RECURRENCE_PRESETS = [
 const combineDateAndTime = (date: string, time: string) => {
   if (!date || !time) return "";
   return `${date}T${time}`;
+};
+
+const parseLocalDateTime = (value: string) => {
+  if (!value) return null;
+  const [datePart, timePart = "00:00"] = value.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hour, minute] = timePart.split(":").map(Number);
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute)
+  ) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const toIsoFromLocalDateTime = (value: string) => parseLocalDateTime(value)?.toISOString() || "";
+
+const formatIsoDateForDisplay = (dateValue: string) => {
+  if (!dateValue) return "Date TBD";
+  const localDate = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(localDate.getTime())) return "Date TBD";
+  return localDate.toLocaleDateString("en-PK", { dateStyle: "medium" });
 };
 
 const getDriverSeatLimitFromStorage = () => {
@@ -299,8 +335,11 @@ function OfferRide() {
     if (!origin || !destination)
       return setErrorMsg("Please enter both pickup and drop-off locations.");
     const earliestDeparture = combineDateAndTime(departureDate, earliestTime);
+    const departureIso = toIsoFromLocalDateTime(earliestDeparture);
     if (!earliestDeparture)
       return setErrorMsg("Please set a departure date and time.");
+    if (!departureIso)
+      return setErrorMsg("Please enter a valid departure date and time.");
     if (departureDate && earliestTime && latestTime && latestTime < earliestTime)
       return setErrorMsg("Latest departure should be after earliest departure.");
     if (isRecurring && recurrencePattern === "custom" && recurrenceDays.length === 0)
@@ -314,18 +353,31 @@ function OfferRide() {
 
     setLoading(true);
     try {
+      const resolvedOriginCoords =
+        originCoords || (origin ? await resolveAddressCoordinates(origin, googleMapsApiKey) : null);
+      const resolvedDestinationCoords =
+        destinationCoords || (destination ? await resolveAddressCoordinates(destination, googleMapsApiKey) : null);
+
+      if (!resolvedOriginCoords || !resolvedDestinationCoords) {
+        setErrorMsg("Please choose valid pickup and drop-off locations from the suggestions.");
+        return;
+      }
+
+      setOriginCoords(resolvedOriginCoords);
+      setDestinationCoords(resolvedDestinationCoords);
+
       await api.post("/rides/offers", {
         origin: {
           address: origin,
-          lat: originCoords ? originCoords[1] : undefined,
-          lng: originCoords ? originCoords[0] : undefined,
+          lat: resolvedOriginCoords[1],
+          lng: resolvedOriginCoords[0],
         },
         destination: {
           address: destination,
-          lat: destinationCoords ? destinationCoords[1] : undefined,
-          lng: destinationCoords ? destinationCoords[0] : undefined,
+          lat: resolvedDestinationCoords[1],
+          lng: resolvedDestinationCoords[0],
         },
-        departureTime: new Date(earliestDeparture).toISOString(),
+        departureTime: departureIso,
         seatsTotal: Number(seatsTotal),
         seatsAvailable: Number(seatsTotal),
         pricePerSeat: Number(pricePerSeat),
@@ -341,7 +393,7 @@ function OfferRide() {
       setPublishDialog({
         origin,
         destination,
-        departure: earliestDeparture,
+        departure: departureIso,
         seats: Number(seatsTotal),
         fare: Number(pricePerSeat || 0),
       });
@@ -709,7 +761,7 @@ function OfferRide() {
                   <div className="h-px bg-gray-200" />
                   <div className="flex items-center justify-between text-[11px] text-gray-500">
                     <span>
-                      {departureDate ? new Date(departureDate).toLocaleDateString("en-PK", { dateStyle: "medium" }) : "Date TBD"}
+                      {formatIsoDateForDisplay(departureDate)}
                     </span>
                     <span className="font-semibold text-gray-700">{earliestTime} – {latestTime}</span>
                   </div>
@@ -797,7 +849,7 @@ function OfferRide() {
                     onClick={() => navigate("/driver-dashboard?tab=bookings")}
                     className="h-11 w-full rounded-2xl bg-emerald-500 text-white font-semibold hover:bg-emerald-600 transition-colors"
                   >
-                    Manage Requests
+                    Manage Open Requests
                   </button>
                 </div>
               </motion.div>

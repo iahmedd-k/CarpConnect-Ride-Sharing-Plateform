@@ -29,6 +29,8 @@ const connectDB = async () => {
     } catch (indexErr) {
       console.log(`Booking index cleanup skipped: ${indexErr.message}`);
     }
+
+    return conn;
   } catch (error) {
     console.error(`Error: ${error.message}`);
     process.exit(1);

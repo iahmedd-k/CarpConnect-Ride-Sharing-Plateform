@@ -29,6 +29,35 @@ const haversineDistanceMeters = (fromLat, fromLng, toLat, toLng) => {
   return earthRadiusM * c;
 };
 
+const DRIVER_MATCH_LOCATION_TOLERANCE_METERS = 3000;
+const DRIVER_MATCH_TIME_MARGIN_MINUTES = 120;
+const DRIVER_ACTIVE_BOOKING_STATUSES = ['confirmed', 'picked_up', 'live'];
+
+const extractCoordinates = (value) => {
+  const candidates = [
+    value?.coordinates,
+    value?.point?.coordinates
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate) && candidate.length === 2) {
+      const lng = Number(candidate[0]);
+      const lat = Number(candidate[1]);
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        return [lng, lat];
+      }
+    }
+  }
+
+  const lng = Number(value?.lng ?? value?.longitude);
+  const lat = Number(value?.lat ?? value?.latitude);
+  if (Number.isFinite(lng) && Number.isFinite(lat)) {
+    return [lng, lat];
+  }
+
+  return null;
+};
+
 const normalizeAddress = (value = '') =>
   String(value || '')
     .toLowerCase()
@@ -70,6 +99,89 @@ const addressSimilarity = (a = '', b = '') => {
     if (tokensB.has(token)) overlap += 1;
   });
   return overlap / Math.max(tokensA.size, tokensB.size);
+};
+
+const isDriverOfferCompatibleWithRequest = (offer, request, preferredMax) => {
+  const offerSeats = Number(offer?.seatsAvailable || 0);
+  if (offerSeats < Number(request?.groupSize || 1)) return false;
+
+  const offerDeparture = new Date(offer?.departureTime);
+  const reqEarliest = new Date(request?.earliestDeparture);
+  const reqLatest = new Date(request?.latestDeparture || request?.earliestDeparture);
+  if (
+    Number.isNaN(offerDeparture.getTime()) ||
+    Number.isNaN(reqEarliest.getTime()) ||
+    Number.isNaN(reqLatest.getTime())
+  ) {
+    return false;
+  }
+
+  const earliestWithMargin = new Date(reqEarliest.getTime() - DRIVER_MATCH_TIME_MARGIN_MINUTES * 60 * 1000);
+  const latestWithMargin = new Date(reqLatest.getTime() + DRIVER_MATCH_TIME_MARGIN_MINUTES * 60 * 1000);
+  if (offerDeparture < earliestWithMargin || offerDeparture > latestWithMargin) return false;
+
+  if (preferredMax > 0 && Number(offer?.pricePerSeat || 0) > preferredMax) return false;
+
+  const offerOriginCoords = extractCoordinates(offer?.origin);
+  const offerDestinationCoords = extractCoordinates(offer?.destination);
+  const requestOriginCoords = extractCoordinates(request?.origin);
+  const requestDestinationCoords = extractCoordinates(request?.destination);
+
+  if (offerOriginCoords && offerDestinationCoords && requestOriginCoords && requestDestinationCoords) {
+    const originDistanceMeters = haversineDistanceMeters(
+      Number(offerOriginCoords[1]),
+      Number(offerOriginCoords[0]),
+      Number(requestOriginCoords[1]),
+      Number(requestOriginCoords[0])
+    );
+    const destinationDistanceMeters = haversineDistanceMeters(
+      Number(offerDestinationCoords[1]),
+      Number(offerDestinationCoords[0]),
+      Number(requestDestinationCoords[1]),
+      Number(requestDestinationCoords[0])
+    );
+
+    return (
+      originDistanceMeters <= DRIVER_MATCH_LOCATION_TOLERANCE_METERS &&
+      destinationDistanceMeters <= DRIVER_MATCH_LOCATION_TOLERANCE_METERS
+    );
+  }
+
+  const originScore = addressSimilarity(request?.originAddress, offer?.originAddress);
+  const destinationScore = addressSimilarity(request?.destinationAddress, offer?.destinationAddress);
+  return originScore >= 0.15 && destinationScore >= 0.15;
+};
+
+const applyEffectiveSeatsToOffers = async (offers) => {
+  const normalizedOffers = Array.isArray(offers) ? offers : [];
+  if (!normalizedOffers.length) return [];
+
+  const offerIds = normalizedOffers.map((offer) => offer?._id).filter(Boolean);
+  const activeBookings = await Booking.find({
+    offerId: { $in: offerIds },
+    status: { $in: DRIVER_ACTIVE_BOOKING_STATUSES }
+  })
+    .select('offerId seatCount')
+    .lean();
+
+  const bookedSeatsByOffer = activeBookings.reduce((acc, booking) => {
+    const offerId = String(booking.offerId || '');
+    if (!offerId) return acc;
+    acc[offerId] = (acc[offerId] || 0) + Math.max(1, Number(booking.seatCount || 1));
+    return acc;
+  }, {});
+
+  return normalizedOffers
+    .map((offer) => {
+      const totalSeats = Math.max(1, Number(offer?.seatsTotal || offer?.seatsAvailable || 1));
+      const reservedSeats = Number(bookedSeatsByOffer[String(offer?._id || '')] || 0);
+      return {
+        ...offer,
+        seatsTotal: totalSeats,
+        seatsAvailable: Math.max(0, totalSeats - reservedSeats)
+      };
+    })
+    .filter((offer) => Number(offer.seatsAvailable || 0) > 0);
 };
 
 const materializeNextRecurringRequest = async (template) => {
@@ -525,13 +637,14 @@ const getMyRideRequests = asyncHandler(async (req, res) => {
 const getDriverOpenRequests = asyncHandler(async (req, res) => {
   const limit = Math.max(1, Math.min(20, Number(req.query.limit || 20)));
   // Get driver's active offers
-  const driverOffers = await RideOffer.find({
+  const rawDriverOffers = await RideOffer.find({
     driverId: req.user._id,
     status: { $in: ['open', 'active'] }
   })
-    .select('_id departureTime seatsAvailable pricePerSeat currency originAddress destinationAddress')
+    .select('_id departureTime seatsAvailable pricePerSeat currency originAddress destinationAddress origin destination')
     .sort({ departureTime: 1 })
     .lean();
+  const driverOffers = await applyEffectiveSeatsToOffers(rawDriverOffers);
 
   const driverCitySet = new Set(
     driverOffers
@@ -569,24 +682,43 @@ const getDriverOpenRequests = asyncHandler(async (req, res) => {
       
       // Find compatible offers
       const compatibleOffers = driverOffers
-        .filter((offer) => {
-          const offerSeats = Number(offer.seatsAvailable || 0);
-          if (offerSeats < Number(request.groupSize || 1)) return false;
-
-          const reqEarliest = new Date(request.earliestDeparture);
-          const reqLatest = new Date(request.latestDeparture);
-          const offerDeparture = new Date(offer.departureTime);
-          if (offerDeparture < reqEarliest || offerDeparture > reqLatest) return false;
-
-          if (preferredMax > 0 && Number(offer.pricePerSeat || 0) > preferredMax) return false;
-
-          return true;
-        })
+        .filter((offer) => isDriverOfferCompatibleWithRequest(offer, request, preferredMax))
         .map((offer) => {
           const originScore = addressSimilarity(request.originAddress, offer.originAddress);
           const destinationScore = addressSimilarity(request.destinationAddress, offer.destinationAddress);
-          const sameArea = originScore >= 0.25 || destinationScore >= 0.25;
-          const nearbyRoute = originScore >= 0.15 && destinationScore >= 0.15;
+          const offerOriginCoords = extractCoordinates(offer.origin);
+          const offerDestinationCoords = extractCoordinates(offer.destination);
+          const requestOriginCoords = extractCoordinates(request.origin);
+          const requestDestinationCoords = extractCoordinates(request.destination);
+          const originDistanceMeters =
+            offerOriginCoords && requestOriginCoords
+              ? haversineDistanceMeters(
+                  Number(offerOriginCoords[1]),
+                  Number(offerOriginCoords[0]),
+                  Number(requestOriginCoords[1]),
+                  Number(requestOriginCoords[0])
+                )
+              : null;
+          const destinationDistanceMeters =
+            offerDestinationCoords && requestDestinationCoords
+              ? haversineDistanceMeters(
+                  Number(offerDestinationCoords[1]),
+                  Number(offerDestinationCoords[0]),
+                  Number(requestDestinationCoords[1]),
+                  Number(requestDestinationCoords[0])
+                )
+              : null;
+          const sameArea =
+            (originDistanceMeters != null && originDistanceMeters <= DRIVER_MATCH_LOCATION_TOLERANCE_METERS) ||
+            (destinationDistanceMeters != null && destinationDistanceMeters <= DRIVER_MATCH_LOCATION_TOLERANCE_METERS) ||
+            originScore >= 0.25 ||
+            destinationScore >= 0.25;
+          const nearbyRoute =
+            (originDistanceMeters != null &&
+              destinationDistanceMeters != null &&
+              originDistanceMeters <= DRIVER_MATCH_LOCATION_TOLERANCE_METERS &&
+              destinationDistanceMeters <= DRIVER_MATCH_LOCATION_TOLERANCE_METERS) ||
+            (originScore >= 0.15 && destinationScore >= 0.15);
 
           return {
             _id: String(offer._id),
@@ -599,10 +731,11 @@ const getDriverOpenRequests = asyncHandler(async (req, res) => {
             sameArea,
             nearbyRoute,
             originScore,
-            destinationScore
+            destinationScore,
+            originDistanceMeters,
+            destinationDistanceMeters
           };
-        })
-        .filter((offer) => offer.sameArea || offer.nearbyRoute);
+        });
 
       return {
         _id: String(request._id),

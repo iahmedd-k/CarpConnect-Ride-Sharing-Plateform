@@ -1,4 +1,5 @@
 const { calculateRouteDistance, calculateRouteDuration } = require('./geospatial');
+const { getRideSnapshot } = require('./rideSnapshotCache');
 
 const CITY_CENTROIDS = [
   { pattern: /islamabad|rawalpindi|rwp/i, coords: [73.0479, 33.6844] },
@@ -16,7 +17,8 @@ const CITY_CENTROIDS = [
 
 const mapOfferStatusToApi = (status) => {
   const normalized = String(status || '').toLowerCase();
-  if (['active', 'booked', 'matched', 'live'].includes(normalized)) return 'active';
+  if (['booked', 'matched'].includes(normalized)) return 'open';
+  if (['active', 'live'].includes(normalized)) return 'active';
   if (normalized === 'completed') return 'completed';
   if (['cancelled', 'canceled'].includes(normalized)) return 'cancelled';
   return 'open';
@@ -115,34 +117,94 @@ const inferPointFromAddress = (address) => {
   return null;
 };
 
+const isCoordinateLikeAddress = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  return /^-?\d+(?:\.\d+)?\s*[, ]\s*-?\d+(?:\.\d+)?$/.test(text);
+};
+
+const firstReadableAddress = (...values) => {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (!text) continue;
+    if (isCoordinateLikeAddress(text)) continue;
+    return text;
+  }
+  return '';
+};
+
+const haversineDistanceKm = (from, to) => {
+  if (!Array.isArray(from) || !Array.isArray(to) || from.length < 2 || to.length < 2) {
+    return 0;
+  }
+
+  const fromLng = Number(from[0]);
+  const fromLat = Number(from[1]);
+  const toLng = Number(to[0]);
+  const toLat = Number(to[1]);
+  if (![fromLng, fromLat, toLng, toLat].every(Number.isFinite)) return 0;
+
+  const toRad = (value) => (value * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(toLat - fromLat);
+  const dLng = toRad(toLng - fromLng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(fromLat)) * Math.cos(toRad(toLat)) * Math.sin(dLng / 2) ** 2;
+
+  return Number((earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2));
+};
+
+const estimateMinutesFromDistance = (distanceKm, averageSpeedKmH = 35) => {
+  const normalizedDistance = Number(distanceKm || 0);
+  if (!(normalizedDistance > 0)) return 0;
+  return Math.max(1, Math.round((normalizedDistance / averageSpeedKmH) * 60));
+};
+
 const toOfferResponse = (offer, driver, options = {}) => {
   const { includeEmissions = true } = options;
+  const snapshot = getRideSnapshot(offer?._id);
   const originAddress =
-    offer.originAddress ||
-    offer.origin?.address ||
-    offer.origin?.location?.address ||
-    'Unknown origin';
+    firstReadableAddress(
+      offer.originAddress,
+      offer.origin?.address,
+      offer.origin?.location?.address,
+      snapshot?.originAddress
+    ) || 'Unknown origin';
   const destinationAddress =
-    offer.destinationAddress ||
-    offer.destination?.address ||
-    offer.destination?.location?.address ||
-    'Unknown destination';
+    firstReadableAddress(
+      offer.destinationAddress,
+      offer.destination?.address,
+      offer.destination?.location?.address,
+      snapshot?.destinationAddress
+    ) || 'Unknown destination';
   const originCoordinates =
     offer.origin?.coordinates ||
     offer.origin?.point?.coordinates ||
+    snapshot?.originCoords ||
     [];
   const destinationCoordinates =
     offer.destination?.coordinates ||
     offer.destination?.point?.coordinates ||
+    snapshot?.destinationCoords ||
     [];
-  const routeCoordinates = offer.routeGeoJson?.coordinates || offer.routeGeoJson?.geometry?.coordinates;
-  const hasRoute = Array.isArray(routeCoordinates) && routeCoordinates.length >= 2;
-  const fallbackDistanceKm = hasRoute ? Number((calculateRouteDistance(offer.routeGeoJson) / 1000).toFixed(2)) : 0;
-  const fallbackDurationMin = hasRoute ? Number(Math.round(calculateRouteDuration(offer.routeGeoJson))) : 0;
+  const routeCoordinates = offer.routeGeoJson?.coordinates || offer.routeGeoJson?.geometry?.coordinates || snapshot?.routeCoords;
+  const hasDetailedRoute = Array.isArray(routeCoordinates) && routeCoordinates.length > 2;
+  const directDistanceKm = haversineDistanceKm(originCoordinates, destinationCoordinates);
+  const fallbackDistanceKm = hasDetailedRoute
+    ? Number((calculateRouteDistance(offer.routeGeoJson) / 1000).toFixed(2))
+    : directDistanceKm;
+  const fallbackDurationMin = hasDetailedRoute
+    ? Number(Math.round(calculateRouteDuration(offer.routeGeoJson)))
+    : estimateMinutesFromDistance(directDistanceKm);
   const estimatedDistanceKm =
-    Number(offer.estimatedDistanceKm || 0) > 0 ? Number(offer.estimatedDistanceKm) : fallbackDistanceKm;
+    Number(offer.estimatedDistanceKm || snapshot?.estimatedDistanceKm || 0) > 0
+      ? Number(offer.estimatedDistanceKm || snapshot?.estimatedDistanceKm)
+      : fallbackDistanceKm;
   const estimatedDurationMin =
-    Number(offer.estimatedDurationMin || 0) > 0 ? Number(offer.estimatedDurationMin) : fallbackDurationMin;
+    Number(offer.estimatedDurationMin || snapshot?.estimatedDurationMin || 0) > 0
+      ? Number(offer.estimatedDurationMin || snapshot?.estimatedDurationMin)
+      : fallbackDurationMin;
   
   return {
     _id: String(offer._id),
@@ -161,7 +223,7 @@ const toOfferResponse = (offer, driver, options = {}) => {
       },
       coordinates: destinationCoordinates
     },
-    departureTime: offer.departureTime,
+    departureTime: offer.departureTime || snapshot?.departureTime || null,
     pricePerSeat: offer.pricePerSeat,
     currency: offer.currency || 'PKR',
     seatsAvailable: offer.seatsAvailable,

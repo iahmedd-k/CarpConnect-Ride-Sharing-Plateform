@@ -53,7 +53,20 @@ const confirmPendingBooking = async (req, res) => {
   }
 
   const seatsNeeded = Number(booking.seatCount || 1);
-  if (Number(offer.seatsAvailable || 0) < seatsNeeded) {
+  const confirmedBookings = await Booking.find({
+    offerId: offer._id,
+    status: { $in: ['confirmed', 'picked_up', 'live'] }
+  })
+    .select('seatCount')
+    .lean();
+  const totalSeats = Math.max(1, Number(offer.seatsTotal || offer.seatsAvailable || 1));
+  const reservedSeats = confirmedBookings.reduce(
+    (sum, item) => sum + Math.max(1, Number(item.seatCount || 1)),
+    0
+  );
+  const effectiveSeatsAvailable = Math.max(0, totalSeats - reservedSeats);
+
+  if (effectiveSeatsAvailable < seatsNeeded) {
     return res.status(409).json({ success: false, message: 'Not enough seats available for this booking anymore' });
   }
 
@@ -63,7 +76,7 @@ const confirmPendingBooking = async (req, res) => {
   }
   await booking.save();
 
-  offer.seatsAvailable = Math.max(0, Number(offer.seatsAvailable || 0) - seatsNeeded);
+  offer.seatsAvailable = Math.max(0, effectiveSeatsAvailable - seatsNeeded);
   if (offer.seatsAvailable === 0 && offer.status === 'open') {
     offer.status = 'matched';
   }
@@ -79,6 +92,16 @@ const confirmPendingBooking = async (req, res) => {
       match.riderIds.push(booking.userId);
     }
     await match.save();
+  }
+
+  if (match?.requestId) {
+    const rideRequest = await RideRequest.findById(match.requestId);
+    if (rideRequest) {
+      rideRequest.status = 'booked';
+      rideRequest.matchId = match._id;
+      rideRequest.bookingId = booking._id;
+      await rideRequest.save();
+    }
   }
 
   const rideParticipants = await getRideParticipants(offer._id);
@@ -121,6 +144,8 @@ const rejectPendingBooking = async (req, res) => {
   booking.paymentStatus = 'cancelled';
   booking.cancellationReason = req.body?.reason || 'Driver rejected the booking request';
   booking.cancellationTime = new Date();
+  booking.hiddenForDriver = true;
+  booking.hiddenForRider = true;
   await booking.save();
 
   let rideRequest = null;
@@ -142,8 +167,6 @@ const rejectPendingBooking = async (req, res) => {
 
   const offer = await RideOffer.findById(booking.offerId);
   if (offer) {
-    const seatsNeeded = Number(booking.seatCount || 1);
-    offer.seatsAvailable = Math.max(0, Number(offer.seatsAvailable || 0) + seatsNeeded);
     if (['matched', 'booked'].includes(String(offer.status || '').toLowerCase())) {
       offer.status = 'open';
     }
